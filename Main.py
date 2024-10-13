@@ -6,6 +6,8 @@ from openai import OpenAI
 import chromadb
 import uuid
 from datetime import datetime
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = FastAPI()
 
@@ -14,6 +16,11 @@ load_dotenv()
 aiclient = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 client = chromadb.PersistentClient(path="./chroma_db")
+
+# Firebase 초기화
+cred = credentials.Certificate("mirrorgram-20713-firebase-adminsdk-u9pdx-c3e12134b4.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 personas = {
     "Joy": {
@@ -41,45 +48,71 @@ personas = {
 class ChatRequest(BaseModel):
     persona_name: str
     user_input: str
+    user: dict
 
 class ChatResponse(BaseModel):
     persona_name: str
     response: str
 
-def get_relevant_memories(persona_name, query, k=3):
-    collection = get_persona_collection(persona_name)
+def get_relevant_memories(uid, persona_name, query, k=3):
+    collection = get_persona_collection(uid, persona_name)
     query_embedding = aiclient.embeddings.create(
         input=query,
         model="text-embedding-ada-002"
     ).data[0].embedding
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=k,
-        where={"is_user_input": True}  # 사용자 입력만 검색
+        n_results=k
     )
-    return results['documents'][0] if results['documents'] else []
+    return results['documents'][0]
 
-def generate_response(persona_name, user_input):
+def get_recent_conversations(uid, persona_name, limit=5): # limit 값 => 이전 대화 몇개까지 불러올건지
+    chat_ref = db.collection('chat').document(uid).collection(persona_name)
+    query = chat_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit)
+    docs = query.get()
+    conversations = []
+    for doc in docs:
+        data = doc.to_dict()
+        conversations.append((data['user_input'], data['response']))
+    return list(reversed(conversations))  # 시간 순으로 정렬
+
+def generate_response(persona_name, user_input, user):
     persona = personas[persona_name]
-    relevant_memories = get_relevant_memories(persona_name, user_input, k=3)
+    relevant_memories = get_relevant_memories(user.get('uid', ''), persona_name, user_input, k=3)
+    recent_conversations = get_recent_conversations(user.get('uid', ''), persona_name)
     
+    user_profile = user.get('profile', {})
+    user_info = f"""
+사용자 정보:
+이름: {user_profile.get('userName', '정보 없음')}
+생일: {user_profile.get('birthday', '정보 없음')}
+MBTI: {user_profile.get('mbti', '정보 없음')}
+성격: {user_profile.get('personality', '정보 없음')}
+    """ if user_profile else "사용자 정보가 제공되지 않았습니다."
+
+    conversation_history = "\n".join([f"사용자: {conv[0]}\n{persona_name}: {conv[1]}" for conv in recent_conversations])
+
     prompt = f"""{persona_name}의 관점에서 대답해주세요. 당신은 다음과 같은 특성을 가지고 있습니다:
 설명: {persona['description']}
 말투: {persona['tone']}
 
-다음은 이전 대화의 기억입니다:
+{user_info}
+
+최근 대화 내역:
+{conversation_history}
+
+관련 기억:
 {' '.join([f'기억 {i+1}: {memory}' for i, memory in enumerate(relevant_memories)])}
 
-중요: 위의 기억들을 주의 깊게 살펴보고, 사용자의 질문에 직접적으로 관련된 정보를 찾아 대답해주세요.
+중요: 위의 최근 대화 내역, 관련 기억, 사용자 정보를 주의 깊게 살펴보고, 사용자의 질문에 직접적으로 관련된 정보를 찾아 대답해주세요.
 만약 관련된 정보가 있다면, 그 정보를 반드시 사용하여 대답하세요.
-관련 정보가 없다면, 당신의 성격에 맞게 창의적으로 대답하되, 이전 대화의 맥락을 고려하세요.
+관련 정보가 없다면, 당신의 성격에 맞게 창의적으로 대답하되, 이전 대화의 맥락과 사용자의 특성을 고려하세요.
 
 친구처럼 반말로 대화하되, 당신의 특성을 잘 반영해주세요. 짧고 간결하게 대답해주세요.
 
+중요 : 다음은 사용자의 질문입니다. 질문에 관하여 대답해주세요.
 사용자: {user_input}
 {persona_name}:"""
-    
-    print("prompt: " + prompt)
 
     response = aiclient.chat.completions.create(
         model="gpt-4o-mini",
@@ -89,18 +122,19 @@ def generate_response(persona_name, user_input):
     )
     return response.choices[0].message.content.strip()
 
-def store_conversation(persona_name, user_input, response):
+def store_conversation(uid, persona_name, user_input, response):
     conversation = f"사용자: {user_input}\n{persona_name}: {response}"
     embedding = aiclient.embeddings.create(
         input=conversation,
         model="text-embedding-ada-002"
     ).data[0].embedding
-    collection = get_persona_collection(persona_name)
+    collection = get_persona_collection(uid, persona_name)
     metadata = {
         "is_user_input": True,
         "persona": persona_name,
         "timestamp": datetime.now().isoformat(),
-        "user_input": user_input
+        "user_input": user_input,
+        "response": response
     }
     unique_id = str(uuid.uuid4())
     collection.add(
@@ -110,18 +144,29 @@ def store_conversation(persona_name, user_input, response):
         ids=[unique_id]
     )
 
-def get_persona_collection(persona_name):
-    return client.get_or_create_collection(f"inside_out_persona_{persona_name}")
+def get_persona_collection(uid, persona_name):
+    return client.get_or_create_collection(f"{uid}_inside_out_persona_{persona_name}")
+
+def store_conversation_firestore(uid, persona_name, user_input, response):
+    chat_ref = db.collection('chat').document(uid).collection(persona_name)
+    chat_ref.add({
+        'user_input': user_input,
+        'response': response,
+        'timestamp': firestore.SERVER_TIMESTAMP
+    })
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_persona(chat_request: ChatRequest):
     if chat_request.persona_name not in personas:
         raise HTTPException(status_code=400, detail="선택한 페르소나가 존재하지 않습니다.")
     
-    response = generate_response(chat_request.persona_name, chat_request.user_input)
+    response = generate_response(chat_request.persona_name, chat_request.user_input, chat_request.user)
     
-    # 대화 내역 저장
-    store_conversation(chat_request.persona_name, chat_request.user_input, response)
+    # 대화 내역 저장 (ChromaDB)
+    store_conversation(chat_request.user.get('uid', ''), chat_request.persona_name, chat_request.user_input, response)
+    
+    # 대화 내역 저장 (Firestore)
+    store_conversation_firestore(chat_request.user.get('uid', ''), chat_request.persona_name, chat_request.user_input, response)
     
     return ChatResponse(persona_name=chat_request.persona_name, response=response)
 
