@@ -94,11 +94,17 @@ def generate_response(persona_name, user_input, user):
     user_profile = user.get('profile', {})
     user_info = f"""
 사용자 정보:
-이름: {user_profile.get('userName', '정보 없음')}
-생일: {user_profile.get('birthdate', '정보 없음')}
+이름: {user.get('displayName', '정보 없음')}
+이메일: {user.get('email', '정보 없음')}
+회원가입 날짜: {user.get('createdAt', '정보 없음')}
+성별: {user_profile.get('gender', '정보 없음')}
 MBTI: {user_profile.get('mbti', '정보 없음')}
-성격: {user_profile.get('personality', '정보 없음')}
-    """ if user_profile else "사용자 정보가 제공되지 않았습니다."
+지역: {user_profile.get('region', '정보 없음')}
+교육:
+  - 수준: {user_profile.get('education', {}).get('level', '정보 없음')}
+  - 전공: {user_profile.get('education', {}).get('major', '정보 없음')}
+  - 대학: {user_profile.get('education', {}).get('university', '정보 없음')}
+    """
 
     conversation_history = "\n".join([f"[{conv[2]}] 사용자: {conv[0]}\n[{conv[2]}] {persona_name}: {conv[1]}" for conv in recent_conversations])
 
