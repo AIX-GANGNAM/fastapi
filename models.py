@@ -1,5 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
+import random
 
 class ChatRequest(BaseModel):
     persona_name: str
@@ -22,15 +23,17 @@ class FeedPost(BaseModel):
     subCommentId: List[str] = []
 
 class PersonaChatRequest(BaseModel):
+    uid: str
     topic: str
     persona1: str
     persona2: str
-    rounds: int = 3  # 기본적으로 3번의 대화 주고받기
+    rounds: int
 
 class ScheduleItem(BaseModel):
     time: str
     interaction_target: str
     topic: str
+    conversation_rounds: int = Field(default_factory=lambda: random.randint(1, 4))
 
 class PersonaSchedule(BaseModel):
     persona: str
@@ -40,6 +43,7 @@ class AllPersonasSchedule(BaseModel):
     schedules: List[PersonaSchedule]
 
 class TaskRequest(BaseModel):
+    uid: str
     persona_name: str
     target_name: str
     topic: str

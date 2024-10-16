@@ -33,7 +33,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-
 async def update_daily_schedule():
     print("모든 사용자의 새로운 일정을 생성하고 등록합니다...")
     users_ref = db.collection('users')
@@ -42,7 +41,7 @@ async def update_daily_schedule():
     for user in users:
         uid = user.id
         all_schedules = generate_and_save_user_schedule(uid)
-        schedule_tasks(all_schedules)
+        schedule_tasks(uid, all_schedules)  # uid 추가
 
 # 라우트 정의
 
@@ -64,14 +63,14 @@ async def persona_chat_endpoint(chat_request: PersonaChatRequest):
 
 @app.post("/execute-task")
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):
-    task = create_task(task_request.persona_name, task_request.target_name, task_request.topic)
+    task = create_task(task_request.uid, task_request.persona_name, task_request.target_name, task_request.topic)  # uid 추가
     background_tasks.add_task(task)
     return {"message": f"Task for {task_request.persona_name} interacting with {task_request.target_name} about {task_request.topic} has been scheduled."}
 
 @app.post("/generate-user-schedule/{uid}")
 async def generate_user_schedule_endpoint(uid: str, background_tasks: BackgroundTasks):
     all_schedules = generate_and_save_user_schedule(uid)
-    background_tasks.add_task(schedule_tasks, all_schedules)
+    background_tasks.add_task(schedule_tasks, uid, all_schedules)  # uid 추가
     return {"message": f"Schedule generated and saved for user {uid}"}
 
 @app.get("/user-schedule/{uid}")

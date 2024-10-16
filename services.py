@@ -9,6 +9,7 @@ import base64
 import requests
 from firebase_admin import firestore
 from models import PersonaChatRequest
+import random
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -20,6 +21,9 @@ from langchain_openai import ChatOpenAI
 from typing import List
 from models import AllPersonasSchedule, PersonaSchedule, ScheduleItem
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 # OpenAI 객체를 생성합니다.
 model = ChatOpenAI(temperature=0, model_name="gpt-4o")
 
@@ -27,7 +31,7 @@ parser = JsonOutputParser(pydantic_object=AllPersonasSchedule)
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """당신은 주인의 페르소나 5명(Joy, Anger, Disgust, Sadness, Fear)의 상호작용하는 일정을 만드는 챗봇입니다. 
-    각 페르소나의 특성은 다음과 같습니다: {personas}
+    각 페르소나의 특성은 다과 같습니다: {personas}
     
     다음 지침을 따라 일정을 만들어주세요:
     1. 각 페르소나별로 10개의 일정 항목을 만들어주세요.
@@ -47,12 +51,33 @@ prompt = prompt.partial(
 
 chain = prompt | model | parser
 
-my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 참석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 회의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동을 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8시에 일어나 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
+my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 회의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동을 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8���에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
 
 
 def generate_daily_schedule():
-    result = chain.invoke({"input": my_persona})
-    return AllPersonasSchedule(**result)
+    schedules = []
+    for persona_name in personas.keys():
+        schedule_items = []
+        for _ in range(10):  # 각 페르소나에 대해 10개의 일정 항목 생성
+            item = ScheduleItem(
+                time=f"{random.randint(0, 23):02d}:{random.randint(0, 59):02d}",
+                interaction_target=random.choice(list(personas.keys())),
+                topic=generate_topic(),
+                conversation_rounds=random.randint(1, 4)
+            )
+            schedule_items.append(item)
+        schedules.append(PersonaSchedule(persona=persona_name, schedule=sorted(schedule_items, key=lambda x: x.time)))
+    
+    return AllPersonasSchedule(schedules=schedules)
+
+def generate_topic():
+    # 여기에 주제 생성 로직을 구현합니다.
+    topics = [
+        "오늘의 날씨", "최근 본 영화", "좋아하는 음식", "주말 계획",
+        "흥미로운 책", "스트레스 해소법", "취미 활동", "행 경험",
+        "최근 뉴스", "인생 목표", "좋아하는 음악", "운동 습관"
+    ]
+    return random.choice(topics)
 
 def print_schedules(all_schedules):
     for persona_schedule in all_schedules.schedules:
@@ -73,17 +98,31 @@ def get_relevant_memories(uid, persona_name, query, k=3):
     )
     return results['documents'][0] if results['documents'] else []
 
-def get_recent_conversations(uid, persona_name, limit=5):
-    chat_ref = db.collection('chat').document(uid).collection(persona_name)
-    query = chat_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit)
-    docs = query.get()
+def get_relevant_conversations(uid: str, persona_name: str, query: str, limit: int = 5):
+    collection = get_persona_collection(uid, persona_name)
+    query_embedding = aiclient.embeddings.create(
+        input=query,
+        model="text-embedding-ada-002"
+    ).data[0].embedding
+    
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=limit,
+        where={"type": "persona_conversation"}  # 페르소나 간 대화만 가져오기
+    )
+    
     conversations = []
-    for doc in docs:
-        data = doc.to_dict()
-        timestamp = data['timestamp']
-        timestamp_str = parse_firestore_timestamp(timestamp)
-        conversations.append((data['user_input'], data['response'], timestamp_str))
-    return list(reversed(conversations))
+    if results['documents']:
+        for doc, metadata in zip(results['documents'][0], results['metadatas'][0]):
+            conversations.append({
+                "conversation": doc,
+                "persona1": metadata['persona1'],
+                "persona2": metadata['persona2'],
+                "timestamp": metadata['timestamp'],
+                "topic": metadata['topic']
+            })
+    
+    return conversations
 
 def get_relevant_feed_posts(uid, query, k=3):
     collection = client.get_or_create_collection(f"feed_{uid}")
@@ -111,7 +150,7 @@ def get_relevant_feed_posts(uid, query, k=3):
 def generate_response(persona_name, user_input, user):
     persona = personas[persona_name]
     relevant_memories = get_relevant_memories(user.get('uid', ''), persona_name, user_input, k=3)
-    recent_conversations = get_recent_conversations(user.get('uid', ''), persona_name)
+    recent_conversations = get_relevant_conversations(user.get('uid', ''), persona_name)
     relevant_feed_posts = get_relevant_feed_posts(user.get('uid', ''), user_input, k=3)
     
     feed_posts_list = []
@@ -195,6 +234,7 @@ MBTI: {user_profile.get('mbti', '정보 없음')}
     )
     return response.choices[0].message.content.strip()
 
+# 사용자 페르소나 대화 임베딩
 def store_conversation(uid, persona_name, user_input, response):
     conversation = f"사용자: {user_input}\n{persona_name}: {response}"
     embedding = aiclient.embeddings.create(
@@ -215,6 +255,41 @@ def store_conversation(uid, persona_name, user_input, response):
         embeddings=[embedding],
         metadatas=[metadata],
         ids=[unique_id]
+    )
+
+# 페르소나 끼리의 대화 임베딩
+def store_persona_conversation(uid: str, persona1_name: str, persona2_name: str, conversation: List[str]):
+    full_conversation = "\n".join(conversation)
+    embedding = aiclient.embeddings.create(
+        input=full_conversation,
+        model="text-embedding-ada-002"
+    ).data[0].embedding
+    
+    metadata = {
+        "persona1": persona1_name,
+        "persona2": persona2_name,
+        "timestamp": datetime.now().isoformat(),
+        "type": "persona_conversation",
+        "topic": conversation[0].split(": ", 1)[1].split(" ", 1)[0]  # 첫 번째 메시지에서 주제 추출
+    }
+    unique_id = generate_unique_id()
+    
+    # 첫 번째 페르소나의 컬렉션에 저장
+    collection1 = get_persona_collection(uid, persona1_name)
+    collection1.add(
+        documents=[full_conversation],
+        embeddings=[embedding],
+        metadatas=[metadata],
+        ids=[f"{unique_id}_1"]
+    )
+    
+    # 두 번째 페르소나의 컬렉션에 저장
+    collection2 = get_persona_collection(uid, persona2_name)
+    collection2.add(
+        documents=[full_conversation],
+        embeddings=[embedding],
+        metadatas=[metadata],
+        ids=[f"{unique_id}_2"]
     )
 
 def store_conversation_firestore(uid, persona_name, user_input, response):
@@ -284,7 +359,7 @@ async def create_feed_post(post):
             model="text-embedding-ada-002"
         ).data[0].embedding
 
-        # ChromaDB 컬렉션 가져오기 또는 생성
+        # ChromaDB 컬렉션 가져오기 또 생성
         collection = client.get_or_create_collection(f"feed_{post.userId}")
 
         # 벡터 DB에 저장
@@ -305,55 +380,80 @@ async def create_feed_post(post):
         print(f"Error details: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
-async def persona_chat(chat_request):
+async def persona_chat(chat_request: PersonaChatRequest):
     if chat_request.persona1 not in personas or chat_request.persona2 not in personas:
         raise HTTPException(status_code=400, detail="선택한 페르소나가 존재하지 않습니다.")
     
     conversation = []
     current_topic = chat_request.topic
+    total_rounds = chat_request.rounds
 
     # 첫 번째 페르소나가 주제에 대해 먼저 말하도록 합니다.
-    initial_response = generate_persona_response(chat_request.persona1, current_topic, [])
+    initial_response = generate_persona_response(chat_request.uid, chat_request.persona1, current_topic, [], total_rounds, 1, is_initial=True)
     conversation.append(f"{chat_request.persona1}: {initial_response}")
 
-    for i in range(chat_request.rounds):
+    for i in range(total_rounds):
+        current_round = i + 1
         # 두 번째 페르소나가 이전 대화에 반응합니다.
-        response2 = generate_persona_response(chat_request.persona2, current_topic, conversation)
+        response2 = generate_persona_response(chat_request.uid, chat_request.persona2, current_topic, conversation, total_rounds, current_round)
         conversation.append(f"{chat_request.persona2}: {response2}")
 
-        # 첫 번째 페르소나가 다시 반응합니다.
-        response1 = generate_persona_response(chat_request.persona1, current_topic, conversation)
-        conversation.append(f"{chat_request.persona1}: {response1}")
+        # 첫 번째 페르소나가 다시 반응합니다 (마지막 라운드가 아닌 경우에만)
+        if current_round < total_rounds:
+            response1 = generate_persona_response(chat_request.uid, chat_request.persona1, current_topic, conversation, total_rounds, current_round)
+            conversation.append(f"{chat_request.persona1}: {response1}")
+
+    # 대화 내용을 벡터 DB에 저장
+    store_persona_conversation(chat_request.uid, chat_request.persona1, chat_request.persona2, conversation)
 
     return {"conversation": conversation}
 
-def generate_persona_response(persona_name, topic, conversation_history):
+def generate_persona_response(uid: str, persona_name: str, topic: str, conversation: List[str], total_rounds: int, current_round: int, is_initial: bool = False):
     persona = personas[persona_name]
+    conversation_str = "\n".join(conversation[-4:])  # 최근 4개의 대화만 포함
 
-    system_message = f"""
-당신은 '{persona_name}'입니다.
-성격: {persona['description']}
-말투: {persona['tone']}
-예시: "{persona['example']}"
-"""
-    print('시스템 메시지 : ' + system_message)
+    # 초기 응답이거나 대화가 없는 경우 주제를 기반으로 관련 정보를 가져옵니다.
+    if is_initial or not conversation:
+        query = topic
+    else:
+        # 가장 최근의 대화를 쿼리로 사용합니다.
+        query = conversation[-1]
 
-    conversation_str = "\n".join(conversation_history)
+    relevant_memories = get_relevant_memories(uid, persona_name, query, k=3)
+    relevant_conversations = get_relevant_conversations(uid, persona_name, query, limit=3)
 
-    prompt = f"""
-주제: {topic}
+    system_message = f"""당신은 '{persona_name}'이라는 페르소나입니다. 
+{persona['description']}
+{persona['tone']}
+예시 대화: {persona['example']}
+
+관련 기억:
+{format_memories(relevant_memories)}
+
+관련 이전 대화:
+{format_conversations(relevant_conversations)}"""
+
+    prompt = f"""주제: {topic}
 
 이전 대화:
 {conversation_str}
 
-'{persona_name}'로서 다음 지침에 따라 반응하세요:
+당신은 {persona_name}로서 위 주제와 이전 대화, 그리고 제공된 관련 기억과 이전 대화를 고려하여 당신의 생각과 감정을 표현하세요. 
+특히 상대방의 마지막 발언에 직접적으로 반응하고, 대화를 이어나가세요. 
 
+현재 라운드: {current_round}/{total_rounds}
+
+주의사항:
 1. 응답은 1~2문장으로 짧게 유지하세요.
-2. 다른 페르소나의 말에 직접 반응하세요.
-3. 자신의 성격과 감정을 드러내세요.
-4. 친구와 대화하듯이 반말로 이야기하세요.
-5. 이모티콘이나 과도한 감탄사를 사용하지 마세요.
-6. 응답에 자신의 이름을 포함하지 마세요.
+2. 만약 이것이 마지막 라운드(현재 라운드 == 총 라운드)라면, 대화를 자연스럽게 마무리하세요.
+3. 마지막 라운드가 아니라면, 대화를 계속 이어갈 수 있는 여지를 남겨두세요.
+4. 항상 페르소나의 특성을 유지하면서 대화하세요.
+5. 다른 페르소나의 말에 직접 반응하세요.
+6. 자신의 성격과 감정을 드러내세요.
+7. 친구와 대화하듯이 반말로 이야기하세요.
+8. 이모티콘이나 과도한 감탄사를 사용하지 마세요.
+9. 응답에 자신의 이름을 포함하지 마세요.
+10. 관련 기억과 이전 대화를 자연스럽게 활용하여 일관성 있는 대화를 만드세요.
 """
 
     messages = [
@@ -364,22 +464,31 @@ def generate_persona_response(persona_name, topic, conversation_history):
     response = aiclient.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
-        max_tokens=150,  # 응답 길이를 더 제한합니다.
-        temperature=0.5,  # 온도를 낮춰 모델이 지침을 더 정확하게 따르도록 합니다.
+        max_tokens=150,
+        temperature=0.8,
     )
 
     generated_response = response.choices[0].message.content.strip()
     print(f"{persona_name}: {generated_response}")
     return generated_response
 
-def create_task(persona_name: str, target_name: str, topic: str):
+def format_memories(memories: List[str]) -> str:
+    return "\n".join([f"- {memory}" for memory in memories])
+
+def format_conversations(conversations: List[dict]) -> str:
+    formatted = []
+    for conv in conversations:
+        formatted.append(f"주제: {conv['topic']}\n대화:\n{conv['conversation']}")
+    return "\n\n".join(formatted)
+
+def create_task(persona_name: str, target_name: str, topic: str, rounds: int):
     async def task():
-        print(f"현재 시간에 '{persona_name}'가 '{target_name}'에게 다음 주제로 상호작용합니다: {topic}")
+        print(f"현재 시간에 '{persona_name}'가 '{target_name}'에게 다음 주제로 상호작용합니다: {topic} (라운드: {rounds})")
         chat_request = PersonaChatRequest(
             topic=topic,
             persona1=persona_name,
             persona2=target_name,
-            rounds=2
+            rounds=rounds
         )
         result = await persona_chat(chat_request)
         print(f"상호작용 결과: {result}")
@@ -388,9 +497,9 @@ def create_task(persona_name: str, target_name: str, topic: str):
 def schedule_tasks(all_schedules):
     for persona_schedule in all_schedules.schedules:
         for item in persona_schedule.schedule:
-            task = create_task(persona_schedule.persona, item.interaction_target, item.topic)
+            task = create_task(persona_schedule.persona, item.interaction_target, item.topic, item.conversation_rounds)
             # FastAPI의 BackgroundTasks를 사용하여 작업 예약
-            # 이 부분은 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템 사용하기!! (연구 필요할듯)
+            # 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템 사용하기!! (연구 필요할듯)
             BackgroundTasks().add_task(task)
     print("모든 작업이 예약되었습니다.")
 
