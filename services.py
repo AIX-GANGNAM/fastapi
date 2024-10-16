@@ -31,7 +31,7 @@ parser = JsonOutputParser(pydantic_object=AllPersonasSchedule)
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """당신은 주인의 페르소나 5명(Joy, Anger, Disgust, Sadness, Fear)의 상호작용하는 일정을 만드는 챗봇입니다. 
-    각 페르소나의 특성은 다과 같습니다: {personas}
+    각 페르소나의 특성은 다음과 같습니다: {personas}
     
     다음 지침을 따라 일정을 만들어주세요:
     1. 각 페르소나별로 10개의 일정 항목을 만들어주세요.
@@ -41,6 +41,7 @@ prompt = ChatPromptTemplate.from_messages([
     5. 페르소나들 간의 갈등, 화해, 협력 등 다양한 상호작용을 포함시켜주세요.
     6. 24시간 동안의 일정이므로, 페르소나들의 일정이 서로 겹치지 않도록 해주세요.
     7. 각 페르소나의 특성이 잘 드러나도록 대화 주제나 상호작용을 설계해주세요.
+    8. 주인의 실제 일정을 고려하여 관련성 있는 상호작용을 만들어주세요.
     """),
     ("user", "다음 형식에 맞춰 일정을 작성해주세요: {format_instructions}\n\n 주인의 오늘 일정: {input}")
 ])
@@ -51,33 +52,31 @@ prompt = prompt.partial(
 
 chain = prompt | model | parser
 
-my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 회의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동을 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8���에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
+my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 회의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동을 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
 
 
-def generate_daily_schedule():
-    schedules = []
-    for persona_name in personas.keys():
-        schedule_items = []
-        for _ in range(10):  # 각 페르소나에 대해 10개의 일정 항목 생성
-            item = ScheduleItem(
-                time=f"{random.randint(0, 23):02d}:{random.randint(0, 59):02d}",
-                interaction_target=random.choice(list(personas.keys())),
-                topic=generate_topic(),
-                conversation_rounds=random.randint(1, 4)
-            )
-            schedule_items.append(item)
-        schedules.append(PersonaSchedule(persona=persona_name, schedule=sorted(schedule_items, key=lambda x: x.time)))
+def generate_daily_schedule(user_schedule: str):
+    result = chain.invoke({"input": user_schedule})
+    return result
+
+def generate_and_save_user_schedule(uid: str):
+    # 사용자의 실제 일정을 가져옵니다.
+    ## 구글 스케쥴 로직 구현
+    user_ref = db.collection('users').document(uid)
+    # user_data = user_ref.get()
+    # user_schedule = user_data.to_dict().get('my_persona', '')
     
-    return AllPersonasSchedule(schedules=schedules)
-
-def generate_topic():
-    # 여기에 주제 생성 로직을 구현합니다.
-    topics = [
-        "오늘의 날씨", "최근 본 영화", "좋아하는 음식", "주말 계획",
-        "흥미로운 책", "스트레스 해소법", "취미 활동", "행 경험",
-        "최근 뉴스", "인생 목표", "좋아하는 음악", "운동 습관"
-    ]
-    return random.choice(topics)
+    # 사용자의 일정을 기반으로 페르소나들의 일정을 생성합니다.
+    all_schedules_dict = generate_daily_schedule(my_persona)
+    all_schedules = AllPersonasSchedule(**all_schedules_dict)
+    
+    # Firebase에 저장
+    # 추후 개발
+    user_ref.set({
+        'schedule': all_schedules.dict()
+    }, merge=True)
+    
+    return all_schedules
 
 def print_schedules(all_schedules):
     for persona_schedule in all_schedules.schedules:
@@ -283,7 +282,7 @@ def store_persona_conversation(uid: str, persona1_name: str, persona2_name: str,
         ids=[f"{unique_id}_1"]
     )
     
-    # 두 번째 페르소나의 컬렉션에 저장
+    #  번째 페르소나의 컬렉션에 저장
     collection2 = get_persona_collection(uid, persona2_name)
     collection2.add(
         documents=[full_conversation],
@@ -481,38 +480,31 @@ def format_conversations(conversations: List[dict]) -> str:
         formatted.append(f"주제: {conv['topic']}\n대화:\n{conv['conversation']}")
     return "\n\n".join(formatted)
 
-def create_task(persona_name: str, target_name: str, topic: str, rounds: int):
+def create_task(uid: str, persona_name: str, interaction_target: str, topic: str, conversation_rounds: int):
     async def task():
-        print(f"현재 시간에 '{persona_name}'가 '{target_name}'에게 다음 주제로 상호작용합니다: {topic} (라운드: {rounds})")
+        print(f"현재 시간에 '{persona_name}'가 '{interaction_target}'에게 다음 주제로 상호작용합니다: {topic} (라운드: {conversation_rounds})")
         chat_request = PersonaChatRequest(
+            uid=uid,
             topic=topic,
             persona1=persona_name,
-            persona2=target_name,
-            rounds=rounds
+            persona2=interaction_target,
+            rounds=conversation_rounds
         )
         result = await persona_chat(chat_request)
         print(f"상호작용 결과: {result}")
     return task
 
-def schedule_tasks(all_schedules):
+def schedule_tasks(uid: str, all_schedules: AllPersonasSchedule):
+    if isinstance(all_schedules, dict):
+        all_schedules = AllPersonasSchedule(**all_schedules)
+    
     for persona_schedule in all_schedules.schedules:
         for item in persona_schedule.schedule:
-            task = create_task(persona_schedule.persona, item.interaction_target, item.topic, item.conversation_rounds)
+            task = create_task(uid, persona_schedule.persona, item.interaction_target, item.topic, item.conversation_rounds)
             # FastAPI의 BackgroundTasks를 사용하여 작업 예약
             # 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템 사용하기!! (연구 필요할듯)
             BackgroundTasks().add_task(task)
     print("모든 작업이 예약되었습니다.")
-
-def generate_and_save_user_schedule(uid: str):
-    all_schedules = generate_daily_schedule()
-    
-    # Firebase에 저장
-    user_ref = db.collection('users').document(uid)
-    user_ref.set({
-        'schedule': all_schedules.dict()
-    }, merge=True)
-    
-    return all_schedules
 
 def get_user_schedule(uid: str):
     user_ref = db.collection('users').document(uid)

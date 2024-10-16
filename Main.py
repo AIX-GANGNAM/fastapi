@@ -34,7 +34,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 async def update_daily_schedule():
-    print("모든 사용자의 새로운 일정을 생성하고 등록합니다...")
+    print("모든 사용자의 새로운 일정을 생성하��� 등록합니다...")
     users_ref = db.collection('users')
     users = users_ref.stream()
     
@@ -61,16 +61,22 @@ async def create_feed_post_endpoint(post: FeedPost):
 async def persona_chat_endpoint(chat_request: PersonaChatRequest):
     return await persona_chat(chat_request)
 
-@app.post("/execute-task")
+@app.post("/execute-task") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):
-    task = create_task(task_request.uid, task_request.persona_name, task_request.target_name, task_request.topic)  # uid 추가
+    task = create_task(
+        task_request.uid,
+        task_request.persona_name,
+        task_request.interaction_target,
+        task_request.topic,
+        task_request.conversation_rounds
+    )
     background_tasks.add_task(task)
-    return {"message": f"Task for {task_request.persona_name} interacting with {task_request.target_name} about {task_request.topic} has been scheduled."}
+    return {"message": f"Task for {task_request.persona_name} interacting with {task_request.interaction_target} about {task_request.topic} at {task_request.time} has been scheduled."}
 
 @app.post("/generate-user-schedule/{uid}")
 async def generate_user_schedule_endpoint(uid: str, background_tasks: BackgroundTasks):
     all_schedules = generate_and_save_user_schedule(uid)
-    background_tasks.add_task(schedule_tasks, uid, all_schedules)  # uid 추가
+    background_tasks.add_task(schedule_tasks, uid, all_schedules)
     return {"message": f"Schedule generated and saved for user {uid}"}
 
 @app.get("/user-schedule/{uid}")
