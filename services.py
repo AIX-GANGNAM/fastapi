@@ -151,7 +151,7 @@ MBTI: {user_profile.get('mbti', '정보 없음')}
 
 당신의 목표는 위의 특성을 바탕으로 사용자에게 응답하는 것입니다.
 사용자와 친구처럼 반말로 대화하세요.
-��재 시간은 {current_time} 입니다. 시간에 관한 질문에는 이 정보를 사용하여 답변하세요.
+현재 시간은 {current_time} 입니다. 시간에 관한 질문에는 이 정보를 사용하여 답변하세요.
 """
 
     assistant_instructions = """
@@ -231,7 +231,7 @@ async def chat_with_persona(chat_request):
     
     response = generate_response(chat_request.persona_name, chat_request.user_input, chat_request.user)
     
-    # 대화 내역 저장 (ChromaDB)
+    # 대화 내역 장 (ChromaDB)
     store_conversation(chat_request.user.get('uid', ''), chat_request.persona_name, chat_request.user_input, response)
     
     # 대화 내역 저장 (Firestore)
@@ -390,6 +390,26 @@ def schedule_tasks(all_schedules):
         for item in persona_schedule.schedule:
             task = create_task(persona_schedule.persona, item.interaction_target, item.topic)
             # FastAPI의 BackgroundTasks를 사용하여 작업 예약
-            # 이 부분은 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템을 사용해야 할 수 있습니다.
+            # 이 부분은 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템 사용하기!! (연구 필요할듯)
             BackgroundTasks().add_task(task)
     print("모든 작업이 예약되었습니다.")
+
+def generate_and_save_user_schedule(uid: str):
+    all_schedules = generate_daily_schedule()
+    
+    # Firebase에 저장
+    user_ref = db.collection('users').document(uid)
+    user_ref.set({
+        'schedule': all_schedules.dict()
+    }, merge=True)
+    
+    return all_schedules
+
+def get_user_schedule(uid: str):
+    user_ref = db.collection('users').document(uid)
+    user_data = user_ref.get()
+    if user_data.exists:
+        schedule_data = user_data.to_dict().get('schedule')
+        if schedule_data:
+            return AllPersonasSchedule(**schedule_data)
+    return None

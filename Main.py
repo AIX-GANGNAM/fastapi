@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -11,10 +11,14 @@ from services import (
     generate_daily_schedule,
     schedule_tasks,
     create_task,
+    generate_and_save_user_schedule,
+    get_user_schedule,
 )
 from typing import List
 from datetime import datetime
-
+from firebase_admin import auth
+from firebase_admin import firestore
+from database import db
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
@@ -28,10 +32,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+
+
 async def update_daily_schedule():
-    print("새로운 일정을 생성하고 등록합니다...")
-    all_schedules = generate_daily_schedule()
-    schedule_tasks(all_schedules)
+    print("모든 사용자의 새로운 일정을 생성하고 등록합니다...")
+    users_ref = db.collection('users')
+    users = users_ref.stream()
+    
+    for user in users:
+        uid = user.id
+        all_schedules = generate_and_save_user_schedule(uid)
+        schedule_tasks(all_schedules)
 
 # 라우트 정의
 
@@ -56,6 +67,19 @@ async def execute_task_endpoint(task_request: TaskRequest, background_tasks: Bac
     task = create_task(task_request.persona_name, task_request.target_name, task_request.topic)
     background_tasks.add_task(task)
     return {"message": f"Task for {task_request.persona_name} interacting with {task_request.target_name} about {task_request.topic} has been scheduled."}
+
+@app.post("/generate-user-schedule/{uid}")
+async def generate_user_schedule_endpoint(uid: str, background_tasks: BackgroundTasks):
+    all_schedules = generate_and_save_user_schedule(uid)
+    background_tasks.add_task(schedule_tasks, all_schedules)
+    return {"message": f"Schedule generated and saved for user {uid}"}
+
+@app.get("/user-schedule/{uid}")
+async def get_user_schedule_endpoint(uid: str):
+    schedule = get_user_schedule(uid)
+    if schedule:
+        return schedule
+    raise HTTPException(status_code=404, detail="Schedule not found for this user")
 
 if __name__ == "__main__":
     import uvicorn
