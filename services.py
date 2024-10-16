@@ -1,13 +1,65 @@
 from database import db, client, aiclient, get_persona_collection
 from personas import personas
 from utils import get_current_time_str, generate_unique_id, parse_firestore_timestamp
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 from typing import List
 from datetime import datetime
 import json
 import base64
 import requests
 from firebase_admin import firestore
+from models import PersonaChatRequest
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_openai import ChatOpenAI
+from typing import List
+from models import AllPersonasSchedule, PersonaSchedule, ScheduleItem
+
+# OpenAI 객체를 생성합니다.
+model = ChatOpenAI(temperature=0, model_name="gpt-4o")
+
+parser = JsonOutputParser(pydantic_object=AllPersonasSchedule)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", """당신은 주인의 페르소나 5명(Joy, Anger, Disgust, Sadness, Fear)의 상호작용하는 일정을 만드는 챗봇입니다. 
+    각 페르소나의 특성은 다음과 같습니다: {personas}
+    
+    다음 지침을 따라 일정을 만들어주세요:
+    1. 각 페르소나별로 10개의 일정 항목을 만들어주세요.
+    2. 각 일정 항목은 다른 페르소나와의 상호작용이나 주인의 일정에 대한 대화여야 합니다.
+    3. 시간을 정각이 아닌 랜덤한 시간으로 설정해주세요 (예: 06:17, 08:43 등).
+    4. 페르소나들이 주인의 일과, 감정, 생각, 행동에 대해 토론하거나 반응하는 상황을 포함시켜주세요.
+    5. 페르소나들 간의 갈등, 화해, 협력 등 다양한 상호작용을 포함시켜주세요.
+    6. 24시간 동안의 일정이므로, 페르소나들의 일정이 서로 겹치지 않도록 해주세요.
+    7. 각 페르소나의 특성이 잘 드러나도록 대화 주제나 상호작용을 설계해주세요.
+    """),
+    ("user", "다음 형식에 맞춰 일정을 작성해주세요: {format_instructions}\n\n 주인의 오늘 일정: {input}")
+])
+prompt = prompt.partial(
+    format_instructions=parser.get_format_instructions(),
+    personas=personas
+)
+
+chain = prompt | model | parser
+
+my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 참석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 회의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동을 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8시에 일어나 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
+
+
+def generate_daily_schedule():
+    result = chain.invoke({"input": my_persona})
+    return AllPersonasSchedule(**result)
+
+def print_schedules(all_schedules):
+    for persona_schedule in all_schedules.schedules:
+        print(f"\n{persona_schedule.persona}의 일정:")
+        for item in persona_schedule.schedule:
+            print(f"{item.time}: {persona_schedule.persona} : target : {item.interaction_target}: {item.topic}")
+        print()
 
 def get_relevant_memories(uid, persona_name, query, k=3):
     collection = get_persona_collection(uid, persona_name)
@@ -99,7 +151,7 @@ MBTI: {user_profile.get('mbti', '정보 없음')}
 
 당신의 목표는 위의 특성을 바탕으로 사용자에게 응답하는 것입니다.
 사용자와 친구처럼 반말로 대화하세요.
-현재 시간은 {current_time} 입니다. 시간에 관한 질문에는 이 정보를 사용하여 답변하세요.
+��재 시간은 {current_time} 입니다. 시간에 관한 질문에는 이 정보를 사용하여 답변하세요.
 """
 
     assistant_instructions = """
@@ -125,7 +177,7 @@ MBTI: {user_profile.get('mbti', '정보 없음')}
 
 현재 시간: {current_time}
 
-중요: 다음은 사용자의 질문입니다. 질문에 관하여 ���답해주세요.
+중요: 다음은 사용자의 질문입니다. 질문에 관하여 답해주세요.
 사용자: {user_input}
 """
 
@@ -319,3 +371,25 @@ def generate_persona_response(persona_name, topic, conversation_history):
     generated_response = response.choices[0].message.content.strip()
     print(f"{persona_name}: {generated_response}")
     return generated_response
+
+def create_task(persona_name: str, target_name: str, topic: str):
+    async def task():
+        print(f"현재 시간에 '{persona_name}'가 '{target_name}'에게 다음 주제로 상호작용합니다: {topic}")
+        chat_request = PersonaChatRequest(
+            topic=topic,
+            persona1=persona_name,
+            persona2=target_name,
+            rounds=2
+        )
+        result = await persona_chat(chat_request)
+        print(f"상호작용 결과: {result}")
+    return task
+
+def schedule_tasks(all_schedules):
+    for persona_schedule in all_schedules.schedules:
+        for item in persona_schedule.schedule:
+            task = create_task(persona_schedule.persona, item.interaction_target, item.topic)
+            # FastAPI의 BackgroundTasks를 사용하여 작업 예약
+            # 이 부분은 실제 구현 시 별도의 작업 스케줄러나 메시지 큐 시스템을 사용해야 할 수 있습니다.
+            BackgroundTasks().add_task(task)
+    print("모든 작업이 예약되었습니다.")
