@@ -45,5 +45,7 @@ class AllPersonasSchedule(BaseModel):
 class TaskRequest(BaseModel):
     uid: str
     persona_name: str
-    target_name: str
+    interaction_target: str
     topic: str
+    conversation_rounds: int
+    time: str
