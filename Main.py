@@ -17,7 +17,10 @@ from services import (
     get_user_schedule,
 )
 
-from generate_image import generate_persona_image
+from generate_image import (
+    generate_persona_image,
+    regenerate_image,
+)
 
 from typing import List
 from datetime import datetime
@@ -127,6 +130,14 @@ async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)
     
 
     return await generate_persona_image(uid,image)
+
+@app.post("/regenerate-image/{emotion}")
+async def regenerate_image_endpoint(emotion: str, image : UploadFile=File(...)):
+    print("regenerate_image_endpoint 호출")
+    print("emotion : ", emotion)
+    print("image : ", image)
+
+    return await regenerate_image(emotion, image)
 
 if __name__ == "__main__":
     import uvicorn
