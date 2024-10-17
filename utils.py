@@ -10,3 +10,4 @@ def generate_unique_id():
 
 def parse_firestore_timestamp(timestamp):
     return timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "시간 정보 없음"
+    

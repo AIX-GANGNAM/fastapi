@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, UploadFile, File
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -14,12 +14,16 @@ from services import (
     generate_and_save_user_schedule,
     get_user_schedule,
 )
+
+from generate_image import generate_persona_image
+
 from typing import List
 from datetime import datetime
 from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
 scheduler = AsyncIOScheduler()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -86,7 +90,18 @@ async def get_user_schedule_endpoint(uid: str):
         return schedule
     raise HTTPException(status_code=404, detail="Schedule not found for this user")
 
+@app.post("/generate-persona-image/{uid}")
+async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)):
+    # 페르소나 이미지 생성 로직 추가
+    print("Persona image generation not implemented yet",uid)
+
+    print("image 확인",image)
+    
+    
+
+    return await generate_persona_image(uid,image)
+
 if __name__ == "__main__":
     import uvicorn
     print("FastAPI 서버 실행")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=1818)
