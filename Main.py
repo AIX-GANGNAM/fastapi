@@ -139,6 +139,13 @@ async def regenerate_image_endpoint(emotion: str, image : UploadFile=File(...)):
 
     return await regenerate_image(emotion, image)
 
+
+@app.get("/networkcheck")
+async def network_check_endpoint():
+    print("network_check_endpoint 호출")
+    return {"message": "Network check successful"}
+
+
 if __name__ == "__main__":
     import uvicorn
     print("FastAPI 서버 실행")
