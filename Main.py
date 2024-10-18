@@ -28,12 +28,12 @@ from datetime import datetime
 from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
-from villageServices import get_all_agents
+# from villageServices import get_all_agents
 from fastapi import WebSocket
-from villageServices import (
-    get_all_agents,
-    AgentManager  # 에이전트 관리를 위한 클래스
-)
+# from villageServices import (
+#     get_all_agents,
+#     AgentManager  # 에이전트 관리를 위한 클래스
+# )
 import asyncio
 
 scheduler = AsyncIOScheduler()
@@ -129,31 +129,31 @@ async def get_user_schedule_endpoint(uid: str):
         return schedule
     raise HTTPException(status_code=404, detail="Schedule not found for this user")
 
-@app.get("/api/agents/{uid}")
-async def read_agents(uid: str):
-    try:
-        agents = get_all_agents(uid)
-        return agents
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.get("/api/agents/{uid}")
+# async def read_agents(uid: str):
+#     try:
+#         agents = get_all_agents(uid)
+#         return agents
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
     
 # WebSocket 엔드포인트
-agent_manager = AgentManager()
+# agent_manager = AgentManager()
 
-@app.websocket("/ws/{uid}")
-async def websocket_endpoint(websocket: WebSocket, uid: str):
-    await agent_manager.connect(websocket)
-    try:
-        while True:
-            # 에이전트 상태 업데이트
-            agent_manager.apply_schedule_to_agents(uid)
-            agent_manager.update_agents()
-            # 에이전트 위치 정보를 전송
-            positions = agent_manager.get_agents_positions()
-            await agent_manager.broadcast(str(positions))
-            await asyncio.sleep(1)  # 1초마다 업데이트
-    except WebSocketDisconnect:
-        agent_manager.disconnect(websocket)
+# @app.websocket("/ws/{uid}")
+# async def websocket_endpoint(websocket: WebSocket, uid: str):
+#     await agent_manager.connect(websocket)
+#     try:
+#         while True:
+#             # 에이전트 상태 업데이트
+#             agent_manager.apply_schedule_to_agents(uid)
+#             agent_manager.update_agents()
+#             # 에이전트 위치 정보를 전송
+#             positions = agent_manager.get_agents_positions()
+#             await agent_manager.broadcast(str(positions))
+#             await asyncio.sleep(1)  # 1초마다 업데이트
+#     except WebSocketDisconnect:
+#         agent_manager.disconnect(websocket)
 
 @app.post("/generate-persona-image/{uid}")
 async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)):
