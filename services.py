@@ -97,7 +97,8 @@ def get_relevant_memories(uid, persona_name, query, k=3):
     )
     return results['documents'][0] if results['documents'] else []
 
-def get_relevant_conversations(uid: str, persona_name: str, query: str, limit: int = 5):
+def get_relevant_conversations(uid: str, persona_name: str, query: str, limit: int = 5): # 사용자의 대화 중 관련된 대화를 가져오는 함수 벡터db서치
+    print("services.py > get_relevant_conversations 호출")
     collection = get_persona_collection(uid, persona_name)
     query_embedding = aiclient.embeddings.create(
         input=query,
@@ -123,7 +124,7 @@ def get_relevant_conversations(uid: str, persona_name: str, query: str, limit: i
     
     return conversations
 
-def get_relevant_feed_posts(uid, query, k=3):
+def get_relevant_feed_posts(uid, query, k=3): # 사용자의 피드 중 관련된 피드를 가져오는 함수 벡터db서치
     collection = client.get_or_create_collection(f"feed_{uid}")
     query_embedding = aiclient.embeddings.create(
         input=query,
@@ -151,7 +152,7 @@ def generate_response(persona_name, user_input, user):
     relevant_memories = get_relevant_memories(user.get('uid', ''), persona_name, user_input, k=3)
     recent_conversations = get_relevant_conversations(user.get('uid', ''), persona_name, user_input)  # user_input을 query로 추가
     relevant_feed_posts = get_relevant_feed_posts(user.get('uid', ''), user_input, k=3)
-    
+   
     feed_posts_list = []
     for i, post in enumerate(relevant_feed_posts):
         caption = post.get('caption', '캡션 없음')
@@ -303,7 +304,7 @@ async def chat_with_persona(chat_request):
     if chat_request.persona_name not in personas:
         raise HTTPException(status_code=400, detail="선택한 페르소나가 존재하지 않습니다.")
     
-    response = generate_response(chat_request.persona_name, chat_request.user_input, chat_request.user)
+    response = generate_response(chat_request.persona_name, chat_request.user_input, chat_request.user) # 모델 호출 답변을 만들어주는 gpt에 넘기는
     
     # 대화 내역 장 (ChromaDB)
     store_conversation(chat_request.user.get('uid', ''), chat_request.persona_name, chat_request.user_input, response)
@@ -528,3 +529,42 @@ def get_user_schedule(uid: str):
         if schedule_data:
             return AllPersonasSchedule(**schedule_data)
     return None
+
+def send_expo_push_notification(uid: str, title: str, message: str):
+    print("service > send_expo_push_notification 호출")
+    print("uid : ", uid)
+    print("title : ", title)
+    print("message : ", message)
+
+    user_ref = db.collection('users').document(uid)
+    user_doc = user_ref.get()
+    if user_doc.exists:
+        expo_token = user_doc.to_dict().get('pushToken') # 푸시 토큰 가져오기
+        if expo_token:
+            headers = {
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate',
+                'Content-Type': 'application/json',
+            }
+
+            # 푸시 알림 데이터 (JSON)
+            payload = {
+                "to": expo_token,            # Expo 푸시 토큰 지금은, 최창욱 핸드폰으로 알람이 가고, 미리보기는 안뜬다
+                "sound": "default",          # 알림 소리
+                "title": title,              # 알림 제목
+                "body": message,             # 알림 메시지
+                "priority": "high",          # 알림 우선순위를 높게 설정
+            }
+
+            # Expo 서버로 푸시 알림 요청 전송
+            response = requests.post("https://exp.host/--/api/v2/push/send", json=payload, headers=headers)
+            print("services > send_expo_push_notification > response", response)
+            # 요청 결과 처리
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+        else:
+            raise HTTPException(status_code=404, detail="푸시 토큰을 찾을 수 없습니다.")
+    else:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    
+    return response.json()
