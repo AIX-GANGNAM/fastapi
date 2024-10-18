@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Depends, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -27,6 +28,14 @@ from datetime import datetime
 from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
+from villageServices import get_all_agents
+from fastapi import WebSocket
+from villageServices import (
+    get_all_agents,
+    AgentManager  # 에이전트 관리를 위한 클래스
+)
+import asyncio
+
 scheduler = AsyncIOScheduler()
 
 
@@ -43,7 +52,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 async def update_daily_schedule():
-    print("모든 사용자의 새로운 일정을 생성하 등록합니다...")
+    print("모든 사용자의 새로운 일정을 생성하고 등록합니다...")
     users_ref = db.collection('users')
     users = users_ref.stream()
     
@@ -120,6 +129,32 @@ async def get_user_schedule_endpoint(uid: str):
         return schedule
     raise HTTPException(status_code=404, detail="Schedule not found for this user")
 
+@app.get("/api/agents/{uid}")
+async def read_agents(uid: str):
+    try:
+        agents = get_all_agents(uid)
+        return agents
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# WebSocket 엔드포인트
+agent_manager = AgentManager()
+
+@app.websocket("/ws/{uid}")
+async def websocket_endpoint(websocket: WebSocket, uid: str):
+    await agent_manager.connect(websocket)
+    try:
+        while True:
+            # 에이전트 상태 업데이트
+            agent_manager.apply_schedule_to_agents(uid)
+            agent_manager.update_agents()
+            # 에이전트 위치 정보를 전송
+            positions = agent_manager.get_agents_positions()
+            await agent_manager.broadcast(str(positions))
+            await asyncio.sleep(1)  # 1초마다 업데이트
+    except WebSocketDisconnect:
+        agent_manager.disconnect(websocket)
+
 @app.post("/generate-persona-image/{uid}")
 async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)):
     # 페르소나 이미지 생성 로직 추가
@@ -127,7 +162,7 @@ async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)
 
     print("image 확인",image)
     
-    
+   
 
     return await generate_persona_image(uid,image)
 
