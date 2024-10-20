@@ -1,12 +1,12 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Depends, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest
-from services import send_expo_push_notification
+from service.services import send_expo_push_notification
 import requests
-from services import (
+from service.services import (
     chat_with_persona,
     get_personas,
     create_feed_post,
@@ -35,6 +35,7 @@ from fastapi import WebSocket
 #     AgentManager  # 에이전트 관리를 위한 클래스
 # )
 import asyncio
+from service.personaChatVer2 import persona_chat_v2
 
 scheduler = AsyncIOScheduler()
 
@@ -58,7 +59,19 @@ async def update_daily_schedule():
     for user in users:
         uid = user.id
         all_schedules = generate_and_save_user_schedule(uid)
-        schedule_tasks(uid, all_schedules)  # uid 추가
+        await schedule_tasks_v2(uid, all_schedules)
+
+async def schedule_tasks_v2(uid: str, all_schedules):
+    for persona_schedule in all_schedules.schedules:
+        for item in persona_schedule.schedule:
+            chat_request = PersonaChatRequest(
+                uid=uid,
+                topic=item.topic,
+                persona1=persona_schedule.persona,
+                persona2=item.interaction_target,
+                rounds=item.conversation_rounds
+            )
+            await persona_chat_v2(chat_request)
 
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
@@ -90,6 +103,10 @@ async def create_feed_post_endpoint(post: FeedPost):
 @app.post("/persona-chat") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def persona_chat_endpoint(chat_request: PersonaChatRequest):
     return await persona_chat(chat_request)
+
+@app.post("/v2/persona-chat")
+async def persona_chat_v2_endpoint(chat_request: PersonaChatRequest):
+    return await persona_chat_v2(chat_request)
 
 @app.post("/execute-task") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):
