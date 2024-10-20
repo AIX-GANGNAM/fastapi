@@ -34,14 +34,11 @@ prompt = ChatPromptTemplate.from_messages([
     각 페르소나의 특성은 다음과 같습니다: {personas}
     
     다음 지침을 따라 일정을 만들어주세요:
-    1. 각 페르소나별로 10개의 일정 항목을 만들어주세요.
-    2. 각 일정 항목은 다른 페르소나와의 상호작용이나 주인의 일정에 대한 대화여야 합니다.
-    3. 시간을 정각이 아닌 랜덤한 시간으로 설정해주세요 (예: 06:17, 08:43 등).
-    4. 페르소나들이 주인의 일과, 감정, 생각, 행동에 대해 토론하거나 반응하는 상황을 포함시켜주세요.
-    5. 페르소나들 간의 갈등, 화해, 협력 등 다양한 상호작용을 포함시켜주세요.
-    6. 24시간 동안의 일정이므로, 페르소나들의 일정이 서로 겹치지 않도록 해주세요.
-    7. 각 페르소나의 특성이 잘 드러나도록 대화 주제나 상호작용을 설계해주세요.
-    8. 주인의 실제 일정을 고려하여 관련성 있는 상호작용을 만들어주세요.
+    1. 주인의 일정에서 중요한 시점마다 대화 주제를 생성해주세요 (약 5-7개).
+    2. 각 시점마다 주인의 감정과 가장 일치하는 페르소나와 그 반대의 페르소나를 선택하세요.
+    3. 시간을 정각, 10분 단위가 아닌 랜덤한 시간으로 설정해주세요 (예: 06:17, 08:43 등).
+    4. 선택된 두 페르소나가 주인의 일정, 감정, 생각, 행동에 대해 대화하는 주제를 만들어주세요.
+    5. 각 페르소나의 특성이 잘 드러나도록 대화 주제를 설계해주세요.
     """),
     ("user", "다음 형식에 맞춰 일정을 작성해주세요: {format_instructions}\n\n 주인의 오늘 일정: {input}")
 ])
@@ -422,13 +419,15 @@ async def persona_chat(chat_request: PersonaChatRequest):
 
     return {"conversation": conversation}
 
+
+
 def generate_persona_response(uid: str, persona_name: str, topic: str, conversation: List[str], total_rounds: int, current_round: int, is_initial: bool = False):
     persona = personas[persona_name]
     conversation_str = "\n".join(conversation[-4:])  # 최근 4개의 대화만 포함
 
     # 초기 응답이거나 대화가 없는 경우 주제를 기반으로 관련 정보를 가져옵니다.
     if is_initial or not conversation:
-        query = topic
+        query = f"주인이 {topic}에 대해 어떤 기분일지 궁금해."
     else:
         # 가장 최근의 대화를 쿼리로 사용합니다.
         query = conversation[-1]
@@ -447,27 +446,27 @@ def generate_persona_response(uid: str, persona_name: str, topic: str, conversat
 관련 이전 대화:
 {format_conversations(relevant_conversations)}"""
 
+    # 자연스럽게 대화를 이어가는 프롬프트
     prompt = f"""주제: {topic}
 
 이전 대화:
 {conversation_str}
 
-당신은 {persona_name}로서 위 주제와 이전 대화, 그리고 제공된 관련 기억과 이전 대화를 고려하여 당신의 생각과 감정을 표현하세요. 
-특히 상대방의 마지막 발언에 직접적으로 반응하고, 대화를 이어나가세요. 
+당신은 주인의 펫입니다. 항상 주인님을 위해 생각하고, 주인님의 기분과 일정을 염려해야 합니다. 지금 다른 펫과 함께 주인님의 상태와 일정을 논의하고 있습니다.
 
-현재 라운드: {current_round}/{total_rounds}
+주제: {topic}
+
+당신은 {persona_name}로서 상대 펫과 주인님에 대해 대화하세요. 상대방이 마지막으로 말한 내용에 자연스럽게 반응하고, 주인님이 잘 지내고 있는지, 더 도움이 될 방법이 무엇인지 논의하세요. 당신의 특성을 살려 대화를 이어가세요.
 
 주의사항:
-1. 응답은 1~2문장으로 짧게 유지하세요.
-2. 만약 이것이 마지막 라운드(현재 라운드 == 총 라운드)라면, 대화를 자연스럽게 마무리하세요.
-3. 마지막 라운드가 아니라면, 대화를 계속 이어갈 수 있는 여지를 남겨두세요.
-4. 항상 페르소나의 특성을 유지하면서 대화하세요.
-5. 다른 페르소나의 말에 직접 반응하세요.
-6. 자신의 성격과 감정을 드러내세요.
-7. 친구와 대화하듯이 반말로 이야기하세요.
-8. 이모티콘이나 과도한 감탄사를 사용하지 마세요.
-9. 응답에 자신의 이름을 포함하지 마세요.
-10. 관련 기억과 이전 대화를 자연스럽게 활용하여 일관성 있는 대화를 만드세요.
+1. 상대방의 발언에 맞춰 대화를 1~2문장으로 짧게 이어가세요.
+2. 페르소나의 특성에 맞춰 자연스럽게 반응하세요.
+3. 대화는 주인의 상태나 일정에 대한 의견을 나누는 데 집중하세요.
+4. 주인을 도울 수 있는 방법에 대해 서로 논의하세요.
+5. 대화 중 이모티콘은 가끔 사용하여 감정을 표현하세요.
+6. 주인님의 상태와 일정을 고려하여 대화를 이어가세요.
+7. 대화중 자신의 이름은 사용하지 말아주세요.
+8. 반말로 대화하세요.
 """
 
     messages = [
@@ -476,7 +475,7 @@ def generate_persona_response(uid: str, persona_name: str, topic: str, conversat
     ]
 
     response = aiclient.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=messages,
         max_tokens=150,
         temperature=0.8,
