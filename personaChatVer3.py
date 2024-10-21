@@ -1,4 +1,3 @@
-# 필요한 라이브러리 임포트 및 환경 변수 로드
 from dotenv import load_dotenv
 from datetime import datetime
 load_dotenv()
@@ -12,6 +11,7 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableWithMessageHistory
 from pydantic import BaseModel
+from redis import Redis
 
 from database import get_persona_collection, redis_client
 from personas import personas
@@ -22,17 +22,17 @@ LLAMA_API_URL = "http://localhost:1234/v1/chat/completions"
 # LLAMA API로 중요도를 계산하는 함수
 def calculate_importance_llama(content):
     prompt = f"""
-    다음 대화 내용의 중요성을 1에서 10까지 숫자로 평가해 주세요. 중요도는 다음 기준을 바탕으로 평가하세요:
+다음 대화 내용의 중요성을 1에서 10까지 숫자로 평가해 주세요. 중요도는 다음 기준을 바탕으로 평가하세요:
 
-    1. 이 대화가 에이전트의 목표 달성에 얼마나 중요한가?
-    2. 이 대화가 에이전트의 감정이나 관계에 중요한 변화를 일으킬 수 있는가?
-    3. 이 대화가 에이전트의 장기적인 행동에 영향을 줄 수 있는가?
+1. 이 대화가 에이전트의 목표 달성에 얼마나 중요한가?
+2. 이 대화가 에이전트의 감정이나 관계에 중요한 변화를 일으킬 수 있는가?
+3. 이 대화가 에이전트의 장기적인 행동에 영향을 줄 수 있는가?
 
-    대화 내용:
-    "{content}"
+대화 내용:
+"{content}"
 
-    응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트 없이 1에서 10 사이의 정수만 반환해주세요.
-    """
+응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트 없이 1에서 10 사이의 정수만 반환해주세요.
+"""
 
     headers = {"Content-Type": "application/json"}
     data = {
@@ -59,6 +59,34 @@ def calculate_importance_llama(content):
         print(f"Llama API 호출 실패: {response.status_code} - {response.text}")
         return 5
 
+# LLAMA API로 요약하는 함수
+def summarize_content(content):
+    prompt = f"""
+다음 대화 내용을 한두 문장으로 간략하게 요약해 주세요.
+
+대화 내용:
+"{content}"
+
+요약:
+"""
+
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "model": "llama",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.5
+    }
+
+    response = requests.post(LLAMA_API_URL, json=data, headers=headers)
+
+    if response.status_code == 200:
+        result = response.json()
+        summary = result['choices'][0]['message']['content'].strip()
+        return summary
+    else:
+        print(f"Llama API 호출 실패: {response.status_code} - {response.text}")
+        return content  # 요약 실패 시 원본 반환
+
 # 툴 정의
 web_search = TavilySearchResults(max_results=1)
 embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
@@ -84,16 +112,18 @@ def get_long_term_memory(uid: str, persona_name: str, query: str, limit=3):
     )
     return results['documents'][0] if results['documents'] else []
 
-# 단기 기억 함수
+# 단기 기억 함수 (요약 적용)
+def store_short_term_memory(uid, persona_name, memory):
+    # 응답 요약
+    summary = summarize_content(memory)
+    redis_key = f"{uid}:{persona_name}:short_term_memory"
+    redis_client.lpush(redis_key, summary)
+    redis_client.ltrim(redis_key, 0, 9)  # 단기 기억 10개만 유지
+
 def get_short_term_memory(uid, persona_name):
     redis_key = f"{uid}:{persona_name}:short_term_memory"
     chat_history = redis_client.lrange(redis_key, 0, 9)
     return [memory.decode('utf-8') for memory in chat_history]
-
-def store_short_term_memory(uid, persona_name, memory):
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
-    redis_client.lpush(redis_key, memory)
-    redis_client.ltrim(redis_key, 0, 9)
 
 # 장기 기억 함수
 def store_long_term_memory(uid, persona_name, memory):
@@ -115,7 +145,7 @@ def get_long_term_memory(uid, persona_name, query, limit=3):
     )
     return results['documents'][0] if results['documents'] else []
 
-# 에이전트 정의
+# 페르소나 정의
 def create_persona_prompt(persona):
     return ChatPromptTemplate.from_messages(
         [
@@ -142,10 +172,11 @@ tools = [get_current_time, search_web, get_long_term_memory]
 
 class LimitedWebSearchAgent(AgentExecutor, BaseModel):
     web_search_count: int = 0
-    max_web_searches: int = 1
+    max_web_searches: int = 1  # 최대 웹 검색 횟수 설정
 
     def invoke(self, input, config=None):
         if self.web_search_count >= self.max_web_searches:
+            # 웹 검색 도구를 제거
             self.tools = [tool for tool in self.tools if tool.name != "search_web"]
         result = super().invoke(input, config)
         if "search_web" in str(result):
@@ -153,6 +184,7 @@ class LimitedWebSearchAgent(AgentExecutor, BaseModel):
         return result
 
 agents = {}
+agent_executors = {}  # 에이전트 실행기를 저장할 딕셔너리
 for persona in personas:
     prompt = create_persona_prompt(persona)
     agent = create_tool_calling_agent(llm, tools, prompt)
@@ -164,8 +196,13 @@ for persona in personas:
         max_execution_time=10,
         handle_parsing_errors=True,
     )
-    agents[persona].executor.web_search_count = 0  # web_search_count 직접 초기화
-
+    agents[persona] = RunnableWithMessageHistory(
+        agent_executor,
+        lambda session_id: ChatMessageHistory(),
+        input_messages_key="input",
+        history_messages_key="chat_history",
+    )
+    agent_executors[persona] = agent_executor  # 에이전트 실행기 저장
 
 class PersonaChatRequest(BaseModel):
     uid: str
@@ -184,7 +221,6 @@ def simulate_conversation(request: PersonaChatRequest):
         for persona in selected_personas:
             # Redis에서 채팅 기록 불러오기
             chat_history = get_short_term_memory(request.uid, persona)
-            chat_history = [memory.decode('utf-8') for memory in chat_history]
             print(f"chat_history for {persona}: {chat_history}")       
             # 장기 기억 검색 (현재 대화 내용을 기반으로)
             long_term_memories = get_long_term_memory(request.uid, persona, previous_response)
@@ -192,7 +228,7 @@ def simulate_conversation(request: PersonaChatRequest):
             response = agents[persona].invoke(
                 {
                     "input": previous_response,  # 이전 페르소나의 응답을 기반으로 대화를 이어감
-                    "chat_history": chat_history,  # Redis에서 불러온 기록을 전달
+                    "chat_history": chat_history,  # Redis에서 불러온 단기 기억 전달
                     "short_term_memory": "\n".join(chat_history),
                     "long_term_memory": "\n".join(long_term_memories),
                 },
@@ -200,7 +236,7 @@ def simulate_conversation(request: PersonaChatRequest):
             )
             print(f"{persona}: {response['output']}\n")
             
-            # 새로운 대화 내용을 Redis에 저장
+            # 새로운 대화 내용을 요약하여 단기 기억에 저장
             store_short_term_memory(request.uid, persona, f"{persona}: {response['output']}")
             store_short_term_memory(request.uid, persona, f"상대방: {previous_response}")
 
@@ -220,8 +256,7 @@ def simulate_conversation(request: PersonaChatRequest):
     
     # 대화 종료 후 웹 검색 카운트 초기화
     for persona in selected_personas:
-        agents[persona]._runnable.web_search_count = 0  # Reset web_search_count
-
+        agent_executors[persona].web_search_count = 0  # web_search_count 직접 초기화
 
 # 대화 시뮬레이션 실행 예시
 chat_request = PersonaChatRequest(
