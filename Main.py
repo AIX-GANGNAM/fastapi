@@ -62,7 +62,7 @@ async def chat_endpoint(chat_request: ChatRequest):
     persona_name = response['persona_name']
     response_text = response['response']
     
-    notification_result = send_expo_push_notification(uid, persona_name, response_text)
+    notification_result = send_expo_push_notification(uid, persona_name, response_text,"persona_chat")
     print("notification_result : ", notification_result)
     
     # ChatResponse 모델에 맞게 반환
