@@ -529,10 +529,10 @@ def get_user_schedule(uid: str):
             return AllPersonasSchedule(**schedule_data)
     return None
 
-def send_expo_push_notification(uid: str, title: str, message: str):
+def send_expo_push_notification(uid: str, whoSendMessage: str, message: str, type: str):
     print("service > send_expo_push_notification 호출")
     print("uid : ", uid)
-    print("title : ", title)
+    print("whoSendMessage : ", whoSendMessage)
     print("message : ", message)
 
     user_ref = db.collection('users').document(uid)
@@ -548,16 +548,23 @@ def send_expo_push_notification(uid: str, title: str, message: str):
 
             # 푸시 알림 데이터 (JSON)
             payload = {
-                "to": expo_token,            # Expo 푸시 토큰 지금은, 최창욱 핸드폰으로 알람이 가고, 미리보기는 안뜬다
-                "sound": "default",          # 알림 소리
-                "title": title,              # 알림 제목
-                "body": message,             # 알림 메시지
+                "to": expo_token, # 푸시 토큰
+                "sound": 'default', # 알림 소리
+                "title": f"{whoSendMessage}", # 알림 제목
+                "body": message, # 알림 메시지          
                 "priority": "high",          # 알림 우선순위를 높게 설정
+                "data": {
+                    "whoSendMessage": whoSendMessage, # 알림 보내는 사람의 아이디 or 이메일 or 페르소나 이름
+                    "highlightTitle": whoSendMessage, # 알림 보내는 사람의 대표 이미지
+                    "highlightImage": 'https://example.com/default-image.jpg', # 알림 보내는 사람의 이미지
+                    "pushType": type, # 페르소나 알림
+                },
+                
             }
 
             # Expo 서버로 푸시 알림 요청 전송
             response = requests.post("https://exp.host/--/api/v2/push/send", json=payload, headers=headers)
-            print("services > send_expo_push_notification > response", response)
+            print("services > send_expo_push_notification > 전송결과", response)
             # 요청 결과 처리
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
