@@ -35,8 +35,8 @@ from fastapi import WebSocket
 #     AgentManager  # 에이전트 관리를 위한 클래스
 # )
 import asyncio
-from service.personaChatVer2 import persona_chat_v2
-
+# from service.personaChatVer2 import persona_chat_v2
+from personaChatVer3 import simulate_conversation
 scheduler = AsyncIOScheduler()
 
 
@@ -71,7 +71,7 @@ async def schedule_tasks_v2(uid: str, all_schedules):
                 persona2=item.interaction_target,
                 rounds=item.conversation_rounds
             )
-            await persona_chat_v2(chat_request)
+            await simulate_conversation(chat_request)
 
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
@@ -105,9 +105,9 @@ async def create_feed_post_endpoint(post: FeedPost):
 async def persona_chat_endpoint(chat_request: PersonaChatRequest):
     return await persona_chat(chat_request)
 
-@app.post("/v2/persona-chat")
-async def persona_chat_v2_endpoint(chat_request: PersonaChatRequest):
-    return await persona_chat_v2(chat_request)
+@app.post("/v3/persona-chat") # 이게 최신버전임
+async def persona_chat_v3_endpoint(chat_request: PersonaChatRequest):
+    return await simulate_conversation(chat_request)
 
 @app.post("/execute-task") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):
