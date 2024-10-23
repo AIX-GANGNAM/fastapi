@@ -253,11 +253,19 @@ def get_user_events(params):
         user_ref = db.collection('calendar').document(uid)
         user_doc = user_ref.get()
 
+
         if user_doc.exists:
             events = user_doc.to_dict().get('events', [])  # 'events' 필드가 없으면 빈 리스트 반환
             
             # 특정 날짜의 이벤트만 필터링
-            filtered_events = [event for event in events if event.get('date') == date]
+            filtered_events = [
+                {
+                    'date': event.get('date'),
+                    'time': datetime.fromisoformat(event.get('time')).strftime('%Y년 %m월 %d일 %p %I시 %M분 %S초 UTC%z') if 'time' in event else '',
+                    'title': event.get('title')
+                }
+                for event in events if event.get('date') == date
+            ]
             
             if not filtered_events:
                 print(f"오늘은 사용자의 캘린더에 등록된 일정이 없습니다.")
@@ -265,6 +273,7 @@ def get_user_events(params):
             return filtered_events  # 필터링된 이벤트 반환
         else:
             return []  # 문서가 존재하지 않으면 빈 리스트 반환
+
     except json.JSONDecodeError as jde:
         print(f"JSON 파싱 오류: {str(jde)}")
         return "Action Input이 올바른 JSON 형식이 아닙니다."
@@ -276,7 +285,7 @@ def save_user_event(params):
     """
     사용자의 캘린더에 이벤트를 저장합니다.
 
-    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid', 'date', 'time', 'title'을 포함해야 함
+    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid', 'date', 'timestamp', 'title'을 포함해야 함
     :return: 저장 결과 메시지 (문자열)
     """
     try:
@@ -290,14 +299,18 @@ def save_user_event(params):
             params = params.replace("\n", "").replace("\r", "").strip()
             params_dict = json.loads(params)
 
-        # 필수 필드 'uid', 'date', 'time', 'title'가 있는지 확인
-        if not all(k in params_dict for k in ['uid', 'date', 'time', 'title']):
-            return "Action Input에 필수 필드가 없습니다. 'uid', 'date', 'time', 'title'가 포함된 JSON 형식으로 입력해주세요."
+        # 필수 필드 'uid', 'date', 'timestamp', 'title'가 있는지 확인
+        if not all(k in params_dict for k in ['uid', 'date', 'timestamp', 'title']):
+            return "Action Input에 필수 필드가 없습니다. 'uid', 'date', 'timestamp', 'title'가 포함된 JSON 형식으로 입력해주세요."
 
         uid = params_dict.get('uid')
-        date = params_dict.get('date')
-        time = params_dict.get('time')
+        date = params_dict.get('date').split('T')[0]  # 날짜만 추출하여 저장
+        timestamp = params_dict.get('timestamp')
         title = params_dict.get('title')
+
+        # timestamp가 문자열 형식일 경우 datetime 객체로 변환
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp)
 
         # Firestore에서 사용자 문서를 가져옴
         user_ref = db.collection('calendar').document(uid)
@@ -312,7 +325,7 @@ def save_user_event(params):
         # 새 이벤트 생성
         new_event = {
             'date': date,
-            'time': time,
+            'time': timestamp,
             'title': title
         }
 
@@ -322,7 +335,7 @@ def save_user_event(params):
         # Firestore에 업데이트
         user_ref.set({'events': events}, merge=True)
 
-        return f"이벤트가 성공적으로 저장되었습니다: {title} ({date} {time})"
+        return f"이벤트가 성공적으로 저장되었습니다: {title} ({timestamp.strftime('%Y년 %m월 %d일 %p %I시 %M분 %S초 UTC%z')})"
 
     except json.JSONDecodeError as jde:
         print(f"JSON 파싱 오류: {str(jde)}")
@@ -330,7 +343,6 @@ def save_user_event(params):
     except Exception as e:
         print(f"Error saving user event: {str(e)}")
         return f"이벤트 저장 중 오류가 발생했습니다: {str(e)}"
-
 
 # 툴 정의
 web_search = TavilySearchResults(max_results=1)
@@ -370,7 +382,7 @@ tools = [
     Tool(
         name="save user event",
         func=save_user_event,
-        description="user의 캘린더에 이벤트를 저장합니다. Input은 'uid', 'date', 'time', 'title'을 포함한 JSON 형식의 문자열이어야 합니다."
+        description="user의 캘린더에 이벤트를 저장합니다. Input은 'uid', 'date', 'timestamp', 'title'을 포함한 JSON 형식의 문자열이어야 합니다."
     )
     # 팔로워 firestore 추가하기
 ]
@@ -422,7 +434,7 @@ Thought:{agent_scratchpad}
 prompt = ChatPromptTemplate.from_template(template)
 
 # LLM 모델 정의
-llm = ChatOpenAI(model="gpt-4", temperature=0)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 # 페르소나별 에이전트 생성
 agents = {}
