@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "image": "4b0ad214-e022-404c-967c-146f2fca31fa.jpg",
+      "image": "image_aopV-nNt_1722596192292_raw.jpg",
       "upload": "image"
     },
     "class_type": "LoadImage",
@@ -17,7 +17,6 @@
       "replace_underscore": false,
       "trailing_comma": false,
       "exclude_tags": "",
-      "tags": "1girl, solo, looking_at_viewer, short_hair, simple_background, brown_hair, brown_eyes, parted_lips, grey_background, sweater, lips, turtleneck, portrait, turtleneck_sweater, nose, realistic, black_sweater",
       "image": [
         "1",
         0
@@ -33,8 +32,7 @@
       "text": [
         "2",
         0
-      ],
-      "text2": "1girl, solo, looking_at_viewer, short_hair, simple_background, brown_hair, brown_eyes, parted_lips, grey_background, sweater, lips, turtleneck, portrait, turtleneck_sweater, nose, realistic, black_sweater"
+      ]
     },
     "class_type": "ShowText|pysssss",
     "_meta": {
@@ -154,7 +152,7 @@
   "19": {
     "inputs": {
       "add_noise": "enable",
-      "noise_seed": 377717113117786,
+      "noise_seed": 155603198246217,
       "steps": 30,
       "cfg": 2,
       "sampler_name": "dpmpp_2m_sde_gpu",
@@ -247,7 +245,7 @@
   "28": {
     "inputs": {
       "add_noise": "disable",
-      "noise_seed": 216994469212231,
+      "noise_seed": 523598625777303,
       "steps": 30,
       "cfg": 8,
       "sampler_name": "dpmpp_2m_sde_gpu",
@@ -384,11 +382,136 @@
       "title": "CLIP Set Last Layer"
     }
   },
+  "40": {
+    "inputs": {
+      "wildcard": "",
+      "Select to add LoRA": "Select the LoRA to add to the text",
+      "Select to add Wildcard": "Select the Wildcard to add to the text",
+      "basic_pipe": [
+        "41",
+        0
+      ],
+      "bbox_detector": [
+        "42",
+        0
+      ],
+      "sam_model_opt": [
+        "43",
+        0
+      ],
+      "segm_detector_opt": [
+        "44",
+        1
+      ]
+    },
+    "class_type": "BasicPipeToDetailerPipe",
+    "_meta": {
+      "title": "BasicPipe -> DetailerPipe"
+    }
+  },
+  "41": {
+    "inputs": {
+      "model": [
+        "23",
+        0
+      ],
+      "clip": [
+        "29",
+        0
+      ],
+      "vae": [
+        "23",
+        2
+      ],
+      "positive": [
+        "25",
+        0
+      ],
+      "negative": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "ToBasicPipe",
+    "_meta": {
+      "title": "ToBasicPipe"
+    }
+  },
+  "42": {
+    "inputs": {
+      "model_name": "bbox/face_yolov8m.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "43": {
+    "inputs": {
+      "model_name": "sam_vit_b_01ec64.pth",
+      "device_mode": "AUTO"
+    },
+    "class_type": "SAMLoader",
+    "_meta": {
+      "title": "SAMLoader (Impact)"
+    }
+  },
+  "44": {
+    "inputs": {
+      "model_name": "segm/person_yolov8m-seg.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "45": {
+    "inputs": {
+      "guide_size": 384,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 79267819114331,
+      "steps": 20,
+      "cfg": 8,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.5,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": false,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7000000000000001,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "refiner_ratio": 0.2,
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "image": [
+        "26",
+        0
+      ],
+      "detailer_pipe": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "FaceDetailerPipe",
+    "_meta": {
+      "title": "FaceDetailer (pipe)"
+    }
+  },
   "39": {
     "inputs": {
       "filename_prefix": "ComfyUI",
       "images": [
-        "26",
+        "45",
         0
       ]
     },

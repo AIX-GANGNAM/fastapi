@@ -148,7 +148,7 @@ async def make_character(prompt_text: str, workflow: dict, image: UploadFile, em
         return {'status': 'complete', 'image_url': firebase_url}
     else:
         return {'status': 'error', 'message': f'Failed to generate image for {emotion}'}
-
+        
 async def regenerate_image(emotion: str, image: UploadFile = File(...)):
     print(f"Regenerating image for {emotion}")
 
@@ -160,5 +160,3 @@ async def regenerate_image(emotion: str, image: UploadFile = File(...)):
     except Exception as e:
         print(f"Error in regenerate_image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-

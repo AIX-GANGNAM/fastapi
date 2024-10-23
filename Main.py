@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, UploadFile, File, WebSocket
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -145,8 +145,21 @@ async def network_check_endpoint():
     print("network_check_endpoint 호출")
     return {"message": "Network check successful"}
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket : WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        print("data : ", data)
+        await websocket.send_text(f"Message received: {data}")
+
 
 if __name__ == "__main__":
     import uvicorn
     print("FastAPI 서버 실행")
     uvicorn.run(app, host="0.0.0.0", port=1818)
+
+
+
+
+    
