@@ -36,7 +36,7 @@ from fastapi import WebSocket
 # )
 import asyncio
 # from service.personaChatVer2 import persona_chat_v2
-from personaChatVer3 import simulate_conversation
+from service.personaChatVer3 import simulate_conversation
 scheduler = AsyncIOScheduler()
 
 

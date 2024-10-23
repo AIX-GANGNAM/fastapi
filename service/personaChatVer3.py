@@ -89,6 +89,7 @@ def summarize_content(content):
 
 def get_long_term_memory_tool(params):
     if isinstance(params, dict):
+        # 이미 dict라면 바로 get_long_term_memory 함수 호출
         return get_long_term_memory(
             params['uid'],
             params['persona_name'],
@@ -96,34 +97,50 @@ def get_long_term_memory_tool(params):
             params.get('limit', 3)
         )
     elif isinstance(params, str):
-        # 문자열을 JSON으로 파싱
         try:
+            # 개행 문자와 앞뒤 공백을 제거하여 JSON 문자열로 변환
+            params = params.replace("\n", "").replace("\r", "").strip()
             params_dict = json.loads(params)
+            
+            # 필요한 필드가 존재하는지 확인
+            if not all(k in params_dict for k in ['uid', 'persona_name', 'query']):
+                return "Action Input에 필수 필드가 없습니다. 'uid', 'persona_name', 'query'가 포함된 JSON 형식으로 입력해주세요."
+            
+            # get_long_term_memory 함수 호출
             return get_long_term_memory(
                 params_dict['uid'],
                 params_dict['persona_name'],
                 params_dict['query'],
                 params_dict.get('limit', 3)
             )
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            # JSON 디코딩 실패 시 에러 메시지 출력
+            print(f"JSON 파싱 오류: {str(e)}")  # 디버깅을 위한 로그 출력
             return "Action Input이 올바른 JSON 형식이 아닙니다. 큰따옴표를 사용하여 JSON 형식으로 입력해주세요."
     else:
-        return "잘못된 Action Input 타입입니다."
+        # 잘못된 타입의 params가 입력된 경우
+        return "잘못된 Action Input 타입입니다. dict 또는 JSON 형식의 문자열이어야 합니다."
+
+
 
     
-# 단기 기억 툴 정의
+# 단기 기억 툴 정의 (개선된 JSON 파싱 로직 추가)
 def get_short_term_memory_tool(params):
     if isinstance(params, dict):
         return get_short_term_memory(**params)
     elif isinstance(params, str):
-        # 문자열을 JSON으로 파싱
+        # 문자열을 JSON으로 파싱 (개행 문자와 기타 불필요한 문자 제거)
         try:
+            # 개행 문자를 제거하고 앞뒤 공백을 제거하여 JSON으로 변환 가능하게 만듦
+            params = params.replace("\n", "").replace("\r", "").strip()
             params_dict = json.loads(params)
             return get_short_term_memory(**params_dict)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {str(e)}")  # 디버깅을 위한 로그 출력
             return "Action Input이 올바른 JSON 형식이 아닙니다. 큰따옴표를 사용하여 JSON 형식으로 입력해주세요."
     else:
         return "잘못된 Action Input 타입입니다."
+
 
 # 단기 기억 함수 (요약 및 대화 시간 포함)
 def store_short_term_memory(uid, persona_name, memory):
@@ -162,8 +179,6 @@ def get_short_term_memory(uid, persona_name):
     # 디코딩된 데이터를 반환
     return decoded_history
 
-
-
 # 장기 기억 함수
 def store_long_term_memory(uid, persona_name, memory):
     collection = get_persona_collection(uid, persona_name)
@@ -184,6 +199,139 @@ def get_long_term_memory(uid, persona_name, query, limit=3):
     )
     return results['documents'][0] if results['documents'] else []
 
+def get_user_profile(params):
+    try:
+        # uid 값을 추출합니다.
+        if isinstance(params, str):
+            params = json.loads(params)
+        uid = params.get('uid')
+        
+        # Firestore의 'users/{UID}' 경로에서 프로필 필드를 가져옵니다.
+        user_ref = db.collection('users').document(uid)
+        user_doc = user_ref.get()
+
+        if user_doc.exists:
+            profile = user_doc.to_dict().get('profile')
+            if profile:
+                return profile
+            else:
+                return f"유저 {uid}의 프로필을 찾을 수 없습니다."
+        else:
+            return f"유저 {uid}의 문서를 찾을 수 없습니다."
+    except Exception as e:
+        # 예외가 발생한 경우 에러 메시지를 반환합니다.
+        return f"Firestore에서 유저 프로필을 가져오는 중 오류가 발생했습니다: {str(e)}"
+
+
+
+def get_user_events(params):
+    """
+    사용자의 캘린더 이벤트를 Firestore에서 가져옵니다.
+    
+    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid'와 'date'를 포함해야 함
+    :return: 사용자의 이벤트 목록 (리스트)
+    """
+    try:
+        # params가 dict 형식이면 그대로 사용, 아니라면 문자열을 처리하여 변환
+        if isinstance(params, dict):
+            params_dict = params
+        elif isinstance(params, str):
+            # 이스케이프 문자가 포함된 경우 이를 제거
+            params = params.replace("\\", "")
+            # 개행 문자와 공백을 제거하여 JSON 문자열로 변환
+            params = params.replace("\n", "").replace("\r", "").strip()
+            params_dict = json.loads(params)
+        
+        # 필수 필드 'uid'와 'date'가 있는지 확인
+        if not all(k in params_dict for k in ['uid', 'date']):
+            return "Action Input에 필수 필드가 없습니다. 'uid'와 'date'가 포함된 JSON 형식으로 입력해주세요."
+        
+        uid = params_dict.get('uid')
+        date = params_dict.get('date')
+
+        # Firestore에서 사용자 문서를 가져옴
+        user_ref = db.collection('calendar').document(uid)
+        user_doc = user_ref.get()
+
+        if user_doc.exists:
+            events = user_doc.to_dict().get('events', [])  # 'events' 필드가 없으면 빈 리스트 반환
+            
+            # 특정 날짜의 이벤트만 필터링
+            filtered_events = [event for event in events if event.get('date') == date]
+            
+            if not filtered_events:
+                print(f"오늘은 사용자의 캘린더에 등록된 일정이 없습니다.")
+                
+            return filtered_events  # 필터링된 이벤트 반환
+        else:
+            return []  # 문서가 존재하지 않으면 빈 리스트 반환
+    except json.JSONDecodeError as jde:
+        print(f"JSON 파싱 오류: {str(jde)}")
+        return "Action Input이 올바른 JSON 형식이 아닙니다."
+    except Exception as e:
+        print(f"Error fetching user events: {str(e)}")
+        return []  # 오류 발생 시 빈 리스트 반환
+
+def save_user_event(params):
+    """
+    사용자의 캘린더에 이벤트를 저장합니다.
+
+    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid', 'date', 'time', 'title'을 포함해야 함
+    :return: 저장 결과 메시지 (문자열)
+    """
+    try:
+        # params가 dict 형식이면 그대로 사용, 아니라면 문자열을 처리하여 변환
+        if isinstance(params, dict):
+            params_dict = params
+        elif isinstance(params, str):
+            # 이스케이프 문자가 포함된 경우 이를 제거
+            params = params.replace("\\", "")
+            # 개행 문자와 공백을 제거하여 JSON 문자열로 변환
+            params = params.replace("\n", "").replace("\r", "").strip()
+            params_dict = json.loads(params)
+
+        # 필수 필드 'uid', 'date', 'time', 'title'가 있는지 확인
+        if not all(k in params_dict for k in ['uid', 'date', 'time', 'title']):
+            return "Action Input에 필수 필드가 없습니다. 'uid', 'date', 'time', 'title'가 포함된 JSON 형식으로 입력해주세요."
+
+        uid = params_dict.get('uid')
+        date = params_dict.get('date')
+        time = params_dict.get('time')
+        title = params_dict.get('title')
+
+        # Firestore에서 사용자 문서를 가져옴
+        user_ref = db.collection('calendar').document(uid)
+        user_doc = user_ref.get()
+
+        # 기존 이벤트 목록에 새 이벤트 추가
+        if user_doc.exists:
+            events = user_doc.to_dict().get('events', [])
+        else:
+            events = []
+
+        # 새 이벤트 생성
+        new_event = {
+            'date': date,
+            'time': time,
+            'title': title
+        }
+
+        # 이벤트 목록에 새 이벤트 추가
+        events.append(new_event)
+
+        # Firestore에 업데이트
+        user_ref.set({'events': events}, merge=True)
+
+        return f"이벤트가 성공적으로 저장되었습니다: {title} ({date} {time})"
+
+    except json.JSONDecodeError as jde:
+        print(f"JSON 파싱 오류: {str(jde)}")
+        return "Action Input이 올바른 JSON 형식이 아닙니다."
+    except Exception as e:
+        print(f"Error saving user event: {str(e)}")
+        return f"이벤트 저장 중 오류가 발생했습니다: {str(e)}"
+
+
 # 툴 정의
 web_search = TavilySearchResults(max_results=1)
 embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
@@ -202,51 +350,74 @@ tools = [
     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
-        description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 선택���으로 'limit'을 포함한 JSON 형식의 문자열이어야 합니다."
+        description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
     ),
     Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
         description="Redis에서 단기 기억을 가져옵니다. Input은 'uid'와 'persona_name'을 포함한 JSON 형식의 문자열이어야 합니다."
+    ),
+    Tool(
+        name="Search Firestore for user profile",
+        func=get_user_profile,
+        description="Firestore에서 유저 프로필을 검색합니다. Input은 'uid'를 포함한 JSON 형식의 문자열이어야 합니다."
+    ),
+    Tool(
+        name="owner's calendar",
+        func=get_user_events,
+        description="user의 캘린더를 가져옵니다. Input은 'uid'와 'date'를 포함한 JSON 형식의 문자열이어야 합니다."
+    ),
+    Tool(
+        name="save user event",
+        func=save_user_event,
+        description="user의 캘린더에 이벤트를 저장합니다. Input은 'uid', 'date', 'time', 'title'을 포함한 JSON 형식의 문자열이어야 합니다."
     )
+    # 팔로워 firestore 추가하기
 ]
 
 # 프롬프트 템플릿 정의
 # Adjusted prompt template with uid
-template = """Answer the following questions as best you can. You are currently acting as the persona named {persona_name}. Your uid is {uid}. Your persona has the following characteristics:
+template = """
+You are currently acting as two personas. Below are the details for each persona:
 
-Description: {persona_description}
-Tone: {persona_tone}
-Example: {persona_example}
+Persona 1:
+- Name: {persona1_name}
+- Description: {persona1_description}
+- Tone: {persona1_tone}
+- Example dialogue: {persona1_example}
+
+Persona 2:
+- Name: {persona2_name}
+- Description: {persona2_description}
+- Tone: {persona2_tone}
+- Example dialogue: {persona2_example}
+
+Owner's UID: {uid}
+
+You both need to discuss the following topic provided by the user: "{topic}". 
+You will take turns responding in the conversation, and you should acknowledge what the other persona has said.
+
+It is now {current_persona_name}'s turn.
 
 You have access to the following tools:
-
 {tools}
 
-Use the following format:
+Use the following format for each response:
 
-Question: the input question you must answer
-Thought: you should always think about what to do
+Question: the input question or topic to discuss
+Thought: think about what to say or do next
 Action: the action to take, should be one of [{tool_names}]
 Action Input: the input to the action, should be a valid JSON string using double quotes.
 Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
+... (This Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+Final Answer: provide the final answer or response
 
 Begin!
 
 Question: {input}
-Thought:{agent_scratchpad}"""
-
-# Updated Tool function for Short Term Memory
-Tool(
-    name="Short Term Memory",
-    func=lambda params: get_short_term_memory(**params) if isinstance(params, dict)
-         else get_short_term_memory(*params.split(',')) if isinstance(params, str) else None,
-    description="Retrieve short term memory from Redis. Input should be a JSON object with 'uid' and 'persona_name'. For example: {'uid': uid, 'persona_name': persona_name}"
-)
-
+Thought:{agent_scratchpad}
+"""
 
 prompt = ChatPromptTemplate.from_template(template)
 
@@ -281,13 +452,26 @@ class PersonaChatRequest(BaseModel):
     rounds: int
 
 
+PERSONA_ORDER = ['Joy', 'Anger', 'Disgust', 'Sadness', 'Fear']
+
+def sort_personas(persona1, persona2):
+    """정의된 순서에 따라 페르소나를 정렬하여 쌍 이름을 생성합니다."""
+    index1 = PERSONA_ORDER.index(persona1)
+    index2 = PERSONA_ORDER.index(persona2)
+    if index1 < index2:
+        return f"{persona1}_{persona2}"
+    else:
+        return f"{persona2}_{persona1}"
 
 async def simulate_conversation(request: PersonaChatRequest):
     selected_personas = [request.persona1, request.persona2]
     previous_response = request.topic  # 최초 주제를 `previous_response`로 설정
 
-    # 고정된 chat_ref 생성
-    chat_ref = db.collection('personachat').document(request.uid).collection(f"{request.persona1}_{request.persona2}")
+    # 페르소나 쌍 이름을 정의된 순서에 따라 정렬
+    pair_name = sort_personas(request.persona1, request.persona2)  # 예: "Anger_Disgust"
+
+    # 정렬된 페르소나 쌍을 사용하여 chat_ref 생성
+    chat_ref = db.collection('personachat').document(request.uid).collection(pair_name)
 
     for i in range(request.rounds):
         for persona in selected_personas:
@@ -296,12 +480,18 @@ async def simulate_conversation(request: PersonaChatRequest):
             # 에이전트 호출에 필요한 입력값 정의
             inputs = {
                 "input": previous_response,
-                "persona_name": persona,
-                "persona_description": persona_info["description"],
-                "persona_tone": persona_info["tone"],
-                "persona_example": persona_info["example"],
+                "persona1_name": request.persona1,
+                "persona1_description": personas[request.persona1]["description"],
+                "persona1_tone": personas[request.persona1]["tone"],
+                "persona1_example": personas[request.persona1]["example"],
+                "persona2_name": request.persona2,
+                "persona2_description": personas[request.persona2]["description"],
+                "persona2_tone": personas[request.persona2]["tone"],
+                "persona2_example": personas[request.persona2]["example"],
+                "current_persona_name": persona,
                 "agent_scratchpad": "",
                 "uid": request.uid,
+                "topic": request.topic,
             }
 
             # 에이전트 호출
@@ -322,15 +512,14 @@ async def simulate_conversation(request: PersonaChatRequest):
             # 중요도 계산
             importance = calculate_importance_llama(response['output'])
 
-            # 중요도가 8 이상이면 장기 기억에 저장
+            # 중요도가 8 이상이면 벡터 db에 저장
             if importance >= 8:
                 store_long_term_memory(request.uid, persona, response['output'])
 
             # 현재 페르소나의 응답을 다음 입력으로 설정
             previous_response = response['output']
 
-    return {"message": "Conversation simulated successfully."}  # 성공적으로 완료된 경우 반환
-        
+    return {"message": "Conversation simulated successfully."}  # 성공적으로 완료된 경우 반환        
         
 
 
