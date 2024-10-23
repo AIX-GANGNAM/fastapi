@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -173,6 +174,14 @@ async def regenerate_image_endpoint(emotion: str, image : UploadFile=File(...)):
 async def network_check_endpoint():
     print("network_check_endpoint 호출")
     return {"message": "Network check successful"}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket : WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        print("data : ", data)
+        await websocket.send_text(f"Message received: {data}")
 
 
 if __name__ == "__main__":
