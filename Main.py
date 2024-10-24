@@ -75,19 +75,23 @@ async def schedule_tasks_v2(uid: str, all_schedules):
             await simulate_conversation(chat_request)
 
 # 라우트 정의
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat_endpoint(chat_request: ChatRequest):
-    uid = chat_request.user.get('uid', '')
+    print("chat > chat_request : ", chat_request)
+    uid = chat_request.user['uid']
+    print("chat > uid : ", uid)
     
     response = await chat_with_persona(chat_request)
+    print("chat > response : ", response)
     
     # 딕셔너리에서 값을 추출합니다.
     persona_name = response['persona_name']
     response_text = response['response']
-    
+    print("chat > persona_name : ", persona_name)
+    print("chat > response_text : ", response_text)
 
     notification_result = send_expo_push_notification(uid, persona_name, response_text,"persona_chat")
-    print("notification_result : ", notification_result)
+    print("chat > notification_result : ", notification_result)
     # ChatResponse 모델에 맞게 반환
     return ChatResponse(persona_name=persona_name, response=response_text)
     # return await chat_with_persona(chat_request) 전에는 이거였음

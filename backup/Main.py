@@ -371,7 +371,7 @@ async def create_feed_post(post: FeedPost):
 
         # GPT-4 Vision을 사용한 이미지 분석
         analysis = aiclient.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user",
