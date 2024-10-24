@@ -25,7 +25,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 # OpenAI 객체를 생성합니다.
-model = ChatOpenAI(temperature=0, model_name="gpt-4o")
+model = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
 
 parser = JsonOutputParser(pydantic_object=AllPersonasSchedule)
 
@@ -49,7 +49,7 @@ prompt = prompt.partial(
 
 chain = prompt | model | parser
 
-my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 ���의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
+my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동 하고, 집에 와서 간단히 저녁을 먹고 10시 30분에 잠들었다."5. "주말 아침, 8에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
 
 
 def generate_daily_schedule(user_schedule: str):
@@ -145,11 +145,14 @@ def get_relevant_feed_posts(uid, query, k=3): # 사용자의 피드 중 관련�
     return []
 
 def generate_response(persona_name, user_input, user):
+    print("services.py > generate_response 호출")
     persona = personas[persona_name]
     relevant_memories = get_relevant_memories(user.get('uid', ''), persona_name, user_input, k=3)
     recent_conversations = get_relevant_conversations(user.get('uid', ''), persona_name, user_input)  # user_input을 query로 추가
     relevant_feed_posts = get_relevant_feed_posts(user.get('uid', ''), user_input, k=3)
-   
+    print("services.py > generate_response > relevant_memories : ", relevant_memories)  
+    print("services.py > generate_response > recent_conversations : ", recent_conversations)
+    print("services.py > generate_response > relevant_feed_posts : ", relevant_feed_posts)
     feed_posts_list = []
     for i, post in enumerate(relevant_feed_posts):
         caption = post.get('caption', '캡션 없음')
@@ -298,10 +301,13 @@ def store_conversation_firestore(uid, persona_name, user_input, response):
     })
 
 async def chat_with_persona(chat_request):
-    if chat_request.persona_name not in personas:
+    print("services.py > chat_with_persona 호출")
+    if chat_request.persona_name.lower() not in [persona.lower() for persona in personas]:
+        print("chat_request.persona_name : ", chat_request.persona_name)
         raise HTTPException(status_code=400, detail="선택한 페르소나가 존재하지 않습니다.")
     
     response = generate_response(chat_request.persona_name, chat_request.user_input, chat_request.user) # 모델 호출 답변을 만들어주는 gpt에 넘기는
+    print("services.py > chat_with_persona > response : ", response)
     
     # 대화 내역 장 (ChromaDB)
     store_conversation(chat_request.user.get('uid', ''), chat_request.persona_name, chat_request.user_input, response)
@@ -323,7 +329,7 @@ async def create_feed_post(post):
         img_data = base64.b64encode(image_data).decode('utf-8')
 
         analysis = aiclient.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user",
@@ -475,7 +481,7 @@ def generate_persona_response(uid: str, persona_name: str, topic: str, conversat
     ]
 
     response = aiclient.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=messages,
         max_tokens=150,
         temperature=0.8,
@@ -558,9 +564,11 @@ def send_expo_push_notification(uid: str, whoSendMessage: str, message: str, typ
                     "highlightTitle": whoSendMessage, # 알림 보내는 사람의 대표 이미지
                     "highlightImage": 'https://example.com/default-image.jpg', # 알림 보내는 사람의 이미지
                     "pushType": type, # 페르소나 알림
+                    "pushTime": datetime.now().isoformat(), # 푸시 알림 시간
                 },
                 
             }
+            print("services > send_expo_push_notification > payload : ", payload)
 
             # Expo 서버로 푸시 알림 요청 전송
             response = requests.post("https://exp.host/--/api/v2/push/send", json=payload, headers=headers)
@@ -574,3 +582,4 @@ def send_expo_push_notification(uid: str, whoSendMessage: str, message: str, typ
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     
     return response.json()
+
