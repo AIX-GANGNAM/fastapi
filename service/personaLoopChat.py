@@ -27,7 +27,7 @@ tools = [
     Tool(
         name="Search",
         func=web_search.invoke,
-        description="useful for when you need to answer questions about current events"
+        description="useful for when you need to answer questions about current events. ALWAYS add 'KST' or '한국시간' when searching for event times or schedules."
     ),
     Tool(
         name="Current Time",
@@ -120,7 +120,7 @@ agent_executor = AgentExecutor(
     tools=tools,
     verbose=True,
     handle_parsing_errors=True,
-    max_iterations=3,
+    max_iterations=15,
     return_intermediate_steps=True
 )
 

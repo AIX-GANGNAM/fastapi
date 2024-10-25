@@ -125,20 +125,26 @@ def get_long_term_memory_tool(params):
     
 # 단기 기억 툴 정의 (개선된 JSON 파싱 로직 추가)
 def get_short_term_memory_tool(params):
-    if isinstance(params, dict):
-        return get_short_term_memory(**params)
-    elif isinstance(params, str):
-        # 문자열을 JSON으로 파싱 (개행 문자와 기타 불필요한 문자 제거)
-        try:
-            # 개행 문자를 제거하고 앞뒤 공백을 제거하여 JSON으로 변환 가능하게 만듦
-            params = params.replace("\n", "").replace("\r", "").strip()
+    try:
+        if isinstance(params, dict):
+            params_dict = params
+        else:
+            # 문자열에서 이스케이프된 따옴표 처리
+            params = params.replace('\\"', '"')
+            # 앞뒤의 따옴표 제거
+            params = params.strip('"')
             params_dict = json.loads(params)
-            return get_short_term_memory(**params_dict)
-        except json.JSONDecodeError as e:
-            print(f"JSON 파싱 오류: {str(e)}")  # 디버깅을 위한 로그 출력
-            return "Action Input이 올바른 JSON 형식이 아닙니다. 큰따옴표를 사용하여 JSON 형식으로 입력해주세요."
-    else:
-        return "잘못된 Action Input 타입입니다."
+        
+        return get_short_term_memory(
+            uid=params_dict.get('uid'),
+            persona_name=params_dict.get('persona_name')
+        )
+    except json.JSONDecodeError as e:
+        print(f"JSON 파싱 오류: {str(e)}")
+        return "JSON 파싱 오류가 발생했습니다."
+    except Exception as e:
+        print(f"오류 발생: {str(e)}")
+        return f"오류가 발생했습니다: {str(e)}"
 
 
 # 단기 기억 함수 (요약 및 대화 시간 포함)
@@ -224,43 +230,29 @@ def get_user_profile(params):
 
 
 def get_user_events(params):
-    """
-    사용자의 캘린더 이벤트를 Firestore에서 가져옵니다.
-    
-    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid'와 'date'를 포함해야 함
-    :return: 사용자의 이벤트 목록 (리스트)
-    """
     try:
-        # params가 dict 형식이면 그대로 사용, 아니라면 문자열을 처리하여 변환
         if isinstance(params, dict):
             params_dict = params
         elif isinstance(params, str):
-            # 이스케이프 문자가 포함된 경우 이를 제거
-            params = params.replace("\\", "")
-            # 개행 문자와 공백을 제거하여 JSON 문자열로 변환
-            params = params.replace("\n", "").replace("\r", "").strip()
+            params = params.replace("\\", "").replace("\n", "").replace("\r", "").strip()
             params_dict = json.loads(params)
         
-        # 필수 필드 'uid'와 'date'가 있는지 확인
         if not all(k in params_dict for k in ['uid', 'date']):
-            return "Action Input에 필수 필드가 없습니다. 'uid'와 'date'가 포함된 JSON 형식으로 입력해주세요."
+            return "Action Input에 필수 필드가 없습니다."
         
         uid = params_dict.get('uid')
         date = params_dict.get('date')
 
-        # Firestore에서 사용자 문서를 가져옴
         user_ref = db.collection('calendar').document(uid)
         user_doc = user_ref.get()
 
-
         if user_doc.exists:
-            events = user_doc.to_dict().get('events', [])  # 'events' 필드가 없으면 빈 리스트 반환
+            events = user_doc.to_dict().get('events', [])
             
-            # 특정 날짜의 이벤트만 필터링
             filtered_events = [
                 {
                     'date': event.get('date'),
-                    'time': datetime.fromisoformat(event.get('time')).strftime('%Y년 %m월 %d일 %p %I시 %M분 %S초 UTC%z') if 'time' in event else '',
+                    'time': event.get('time').strftime('%Y년 %m월 %d일 %p %I시 %M분 %S초 UTC%z') if isinstance(event.get('time'), datetime) else str(event.get('time')),
                     'title': event.get('title')
                 }
                 for event in events if event.get('date') == date
@@ -269,16 +261,13 @@ def get_user_events(params):
             if not filtered_events:
                 print(f"오늘은 사용자의 캘린더에 등록된 일정이 없습니다.")
                 
-            return filtered_events  # 필터링된 이벤트 반환
+            return filtered_events
         else:
-            return []  # 문서가 존재하지 않으면 빈 리스트 반환
+            return []
 
-    except json.JSONDecodeError as jde:
-        print(f"JSON 파싱 오류: {str(jde)}")
-        return "Action Input이 올바른 JSON 형식이 아닙니다."
     except Exception as e:
         print(f"Error fetching user events: {str(e)}")
-        return []  # 오류 발생 시 빈 리스트 반환
+        return []
 
 def save_user_event(params):
     try:
@@ -528,5 +517,7 @@ async def simulate_conversation(request: PersonaChatRequest):
 # )
 
 # simulate_conversation(chat_request)
+
+
 
 
