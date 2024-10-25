@@ -35,11 +35,10 @@ def calculate_importance_llama(content):
 
     headers = {"Content-Type": "application/json"}
     data = {
-        "model": "exaone-3.0-7.8b-instruct",
+        "model": "exaone",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1
     }
-
     response = requests.post(LLAMA_API_URL, json=data, headers=headers)
 
     if response.status_code == 200:
@@ -72,7 +71,7 @@ def summarize_content(content):
 
     headers = {"Content-Type": "application/json"}
     data = {
-        "model": "exaone-3.0-7.8b-instruct",
+        "model": "exaone",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5
     }
@@ -282,64 +281,44 @@ def get_user_events(params):
         return []  # 오류 발생 시 빈 리스트 반환
 
 def save_user_event(params):
-    """
-    사용자의 캘린더에 이벤트를 저장합니다.
-
-    :param params: JSON 형식의 문자열 또는 딕셔너리로 'uid', 'date', 'timestamp', 'title'을 포함해야 함
-    :return: 저장 결과 메시지 (문자열)
-    """
     try:
-        # params가 dict 형식이면 그대로 사용, 아니라면 문자열을 처리하여 변환
         if isinstance(params, dict):
             params_dict = params
         elif isinstance(params, str):
-            # 이스케이프 문자가 포함된 경우 이를 제거
-            params = params.replace("\\", "")
-            # 개행 문자와 공백을 제거하여 JSON 문자열로 변환
-            params = params.replace("\n", "").replace("\r", "").strip()
+            params = params.replace("\\", "").replace("\n", "").replace("\r", "").strip()
             params_dict = json.loads(params)
 
-        # 필수 필드 'uid', 'date', 'timestamp', 'title'가 있는지 확인
         if not all(k in params_dict for k in ['uid', 'date', 'timestamp', 'title']):
-            return "Action Input에 필수 필드가 없습니다. 'uid', 'date', 'timestamp', 'title'가 포함된 JSON 형식으로 입력해주세요."
+            return "Action Input에 필수 필드가 없습니다."
 
         uid = params_dict.get('uid')
-        date = params_dict.get('date').split('T')[0]  # 날짜만 추출하여 저장
-        timestamp = params_dict.get('timestamp')
+        date = params_dict.get('date')  # 날짜 문자열 (예: "2024-10-24")
+        time_str = params_dict.get('timestamp')  # 시간 문자열 (예: "12:30:00")
         title = params_dict.get('title')
 
-        # timestamp가 문자열 형식일 경우 datetime 객체로 변환
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
+        # timestamp를 datetime 객체로 변환
+        full_datetime_str = f"{date}T{time_str}+09:00"  # ISO 형식으로 변환
+        timestamp = datetime.fromisoformat(full_datetime_str)
 
-        # Firestore에서 사용자 문서를 가져옴
+        # Firestore에 저장할 데이터 형식
+        new_event = {
+            'date': date,  # 문자열 형식 (예: "2024-10-24")
+            'time': timestamp,  # Timestamp 객체
+            'title': title,  # 문자열
+            'starred': False  # 기본값
+        }
+
+        # Firestore에 저장
         user_ref = db.collection('calendar').document(uid)
         user_doc = user_ref.get()
 
-        # 기존 이벤트 목록에 새 이벤트 추가
-        if user_doc.exists:
-            events = user_doc.to_dict().get('events', [])
-        else:
-            events = []
-
-        # 새 이벤트 생성
-        new_event = {
-            'date': date,
-            'time': timestamp,
-            'title': title
-        }
-
-        # 이벤트 목록에 새 이벤트 추가
+        events = user_doc.to_dict().get('events', []) if user_doc.exists else []
         events.append(new_event)
-
-        # Firestore에 업데이트
+        
         user_ref.set({'events': events}, merge=True)
 
-        return f"이벤트가 성공적으로 저장되었습니다: {title} ({timestamp.strftime('%Y년 %m월 %d일 %p %I시 %M분 %S초 UTC%z')})"
+        return f"이벤트가 성공적으로 저장되었습니다: {title}"
 
-    except json.JSONDecodeError as jde:
-        print(f"JSON 파싱 오류: {str(jde)}")
-        return "Action Input이 올바른 JSON 형식이 아닙니다."
     except Exception as e:
         print(f"Error saving user event: {str(e)}")
         return f"이벤트 저장 중 오류가 발생했습니다: {str(e)}"
@@ -536,6 +515,9 @@ async def simulate_conversation(request: PersonaChatRequest):
 
 
 
+
+
+
 # 대화 시뮬레이션 실행 예시
 # chat_request = PersonaChatRequest(
 #     uid="test01",
@@ -546,4 +528,5 @@ async def simulate_conversation(request: PersonaChatRequest):
 # )
 
 # simulate_conversation(chat_request)
+
 

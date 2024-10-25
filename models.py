@@ -7,6 +7,11 @@ class ChatRequest(BaseModel):
     user_input: str
     user: dict
 
+class ChatRequestV2(BaseModel):
+    uid: str
+    persona_name: str
+    user_input: str
+
 class ChatResponse(BaseModel):
     persona_name: str
     response: str
@@ -49,3 +54,15 @@ class TaskRequest(BaseModel):
     topic: str
     conversation_rounds: int
     time: str
+
+# 요청으로 들어오는 데이터를 위한 Pydantic 모델
+class SmsRequest(BaseModel):
+    phone_number: str
+    message: str  # 사용자 정의 메시지
+
+class StarEventRequest(BaseModel):
+    uid: str  # 사용자 ID
+    eventId: str  # 이벤트 ID
+    starred: bool  # 별표 상태
+    time: str  # ISO 8601 형식의 시간
+    userPhone: str  # 사용자 전화번호 추가
