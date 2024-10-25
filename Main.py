@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest
+from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2
 from service.services import send_expo_push_notification
 import requests
 from service.services import (
@@ -24,7 +24,7 @@ from generate_image import (
 )
 
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
 from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
@@ -38,7 +38,11 @@ import asyncio
 # from service.personaChatVer2 import persona_chat_v2
 from service.personaChatVer3 import simulate_conversation
 scheduler = AsyncIOScheduler()
-
+from service.smsservice import send_sms_service
+from service.personaSms import star_event
+import dateutil.parser
+import pytz
+from service.personaLoopChat import persona_chat_v2
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,6 +93,10 @@ async def chat_endpoint(chat_request: ChatRequest):
     # ChatResponse 모델에 맞게 반환
     return ChatResponse(persona_name=persona_name, response=response_text)
     # return await chat_with_persona(chat_request) 전에는 이거였음
+
+@app.post("/v2/chat")
+async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
+    return await persona_chat_v2(chat_request)
 
 
 @app.get("/personas")
@@ -173,6 +181,41 @@ async def network_check_endpoint():
     print("network_check_endpoint 호출")
     return {"message": "Network check successful"}
 
+# SMS 전송 엔드포인트 (Test 용)
+@app.post("/send_sms")
+def send_sms(request: SmsRequest):
+    result = send_sms_service(request)  # 비동기로 서비스 함수 호출
+
+    # 서비스 함수로부터 성공/실패 결과를 받아서 HTTPException 처리
+    if result["status"] == "success":
+        return {"message": result["message"]}
+    else:
+        raise HTTPException(status_code=result["status_code"], detail=result["message"])
+    
+@app.post("/star-event")
+async def star_event_endpoint(request: StarEventRequest, background_tasks: BackgroundTasks):
+    if request.starred:
+        # ISO 형식의 시간 문자열을 파싱하여 datetime 객체로 변환
+        event_time = dateutil.parser.isoparse(request.time)
+        
+        # 10분 전의 시간을 계산
+        scheduled_time = event_time - timedelta(minutes=10)
+        
+        # 타임존을 고려하여 현지 시간대로 변환 (옵션: 필요시 현지 시간대 적용)
+        # local_tz = pytz.timezone("Asia/Seoul")
+        # scheduled_time = scheduled_time.astimezone(local_tz)
+        
+        # apscheduler로 작업을 예약
+        scheduler.add_job(star_event_task, 'date', run_date=scheduled_time, args=[request])
+        print(f"Star event scheduled for {scheduled_time}")
+        
+        return {"message": f"Star event scheduled for {scheduled_time}"}
+    else:
+        return {"message": "Star event not scheduled, 'starred' is False"}
+
+async def star_event_task(request: StarEventRequest):
+    # 실제 star_event 실행
+    await star_event(request)
 
 if __name__ == "__main__":
     import uvicorn

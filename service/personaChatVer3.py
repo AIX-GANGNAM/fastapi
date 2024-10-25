@@ -35,11 +35,10 @@ def calculate_importance_llama(content):
 
     headers = {"Content-Type": "application/json"}
     data = {
-        "model": "exaone-3.0-7.8b-instruct",
+        "model": "exaone",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1
     }
-
     response = requests.post(LLAMA_API_URL, json=data, headers=headers)
 
     if response.status_code == 200:
@@ -72,7 +71,7 @@ def summarize_content(content):
 
     headers = {"Content-Type": "application/json"}
     data = {
-        "model": "exaone-3.0-7.8b-instruct",
+        "model": "exaone",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.5
     }
@@ -533,6 +532,9 @@ async def simulate_conversation(request: PersonaChatRequest):
 
     return {"message": "Conversation simulated successfully."}  # 성공적으로 완료된 경우 반환        
         
+
+
+
 
 
 
