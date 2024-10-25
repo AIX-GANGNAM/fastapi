@@ -217,13 +217,13 @@ async def star_event_task(request: StarEventRequest):
     # 실제 star_event 실행
     await star_event(request)
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket : WebSocket):
-    await websocket.accept()
-    while True:
-        data = await websocket.receive_text()
-        print("data : ", data)
-        await websocket.send_text(f"Message received: {data}")
+# @app.websocket("/ws")
+# async def websocket_endpoint(websocket : WebSocket):
+#     await websocket.accept()
+#     while True:
+#         data = await websocket.receive_text()
+#         print("data : ", data)
+#         await websocket.send_text(f"Message received: {data}")
 
 if __name__ == "__main__":
     import uvicorn
