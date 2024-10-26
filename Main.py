@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2
 from service.services import send_expo_push_notification
 import requests
@@ -25,6 +26,8 @@ from generate_image import (
 
 from typing import List
 from datetime import datetime, timedelta
+import pytz
+from dateutil import parser
 from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
@@ -37,45 +40,59 @@ from fastapi import WebSocket
 import asyncio
 # from service.personaChatVer2 import persona_chat_v2
 from service.personaChatVer3 import simulate_conversation
-scheduler = AsyncIOScheduler()
 from service.smsservice import send_sms_service
 from service.personaSms import star_event
-import dateutil.parser
-import pytz
-from service.personaLoopChat import persona_chat_v2
+import uvicorn
+from pytz import timezone
+
+
+
+# 스케줄러 초기화
+scheduler = AsyncIOScheduler(
+    timezone=pytz.timezone('Asia/Seoul'),
+    job_defaults={
+        'coalesce': True,  # 밀린 작업 중복 방지
+        'max_instances': 5,  # 동시 실행 제한
+        'misfire_grace_time': 300  # 5분까지 허용
+    }
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시 실행
-    scheduler.add_job(update_daily_schedule, CronTrigger(hour=1, minute=0)) # 매일 새벽 1시에 스케쥴 초기화
-    scheduler.start()
+    # 이벤트 루프 설정
+    loop = asyncio.get_event_loop()
+    try:
+        scheduler.start(paused=False)
+        print("스케줄러가 시작되었습니다.")
+    except Exception as e:
+        print(f"스케줄러 시작 중 오류 발생: {str(e)}")
     yield
-    # 종료 시 실행
-    scheduler.shutdown()
+    try:
+        scheduler.shutdown()
+        print("스케줄러가 종료되었습니다.")
+    except Exception as e:
+        print(f"스케줄러 종료 중 오류 발생: {str(e)}")
 
+# FastAPI 앱 초기화
 app = FastAPI(lifespan=lifespan)
 
-
-async def update_daily_schedule():
-    users_ref = db.collection('users')
-    users = users_ref.stream()
-    
-    for user in users:
-        uid = user.id
-        all_schedules = generate_and_save_user_schedule(uid)
-        await schedule_tasks_v2(uid, all_schedules)
-
-async def schedule_tasks_v2(uid: str, all_schedules):
-    for persona_schedule in all_schedules.schedules:
-        for item in persona_schedule.schedule:
-            chat_request = PersonaChatRequest(
-                uid=uid,
-                topic=item.topic,
-                persona1=persona_schedule.persona,
-                persona2=item.interaction_target,
-                rounds=item.conversation_rounds
-            )
-            await simulate_conversation(chat_request)
+# 스케줄러 상태 확인 엔드포인트
+@app.get("/scheduler-status")
+async def get_scheduler_status():
+    try:
+        jobs = scheduler.get_jobs()
+        return {
+            "status": "running" if scheduler.running else "stopped",
+            "jobs_count": len(jobs),
+            "jobs": [
+                {
+                    "id": job.id,
+                    "next_run_time": str(job.next_run_time)
+                } for job in jobs
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
@@ -193,29 +210,45 @@ def send_sms(request: SmsRequest):
         raise HTTPException(status_code=result["status_code"], detail=result["message"])
     
 @app.post("/star-event")
-async def star_event_endpoint(request: StarEventRequest, background_tasks: BackgroundTasks):
+async def star_event_endpoint(request: StarEventRequest):
     if request.starred:
-        # ISO 형식의 시간 문자열을 파싱하여 datetime 객체로 변환
-        event_time = dateutil.parser.isoparse(request.time)
-        
-        # 10분 전의 시간을 계산
-        scheduled_time = event_time - timedelta(minutes=10)
-        
-        # 타임존을 고려하여 현지 시간대로 변환 (옵션: 필요시 현지 시간대 적용)
-        # local_tz = pytz.timezone("Asia/Seoul")
-        # scheduled_time = scheduled_time.astimezone(local_tz)
-        
-        # apscheduler로 작업을 예약
-        scheduler.add_job(star_event_task, 'date', run_date=scheduled_time, args=[request])
-        print(f"Star event scheduled for {scheduled_time}")
-        
-        return {"message": f"Star event scheduled for {scheduled_time}"}
+        try:
+            kst = pytz.timezone('Asia/Seoul')
+            utc = pytz.UTC
+            current_time = datetime.now(kst)
+            
+            # UTC 시간을 KST로 변환
+            event_time_utc = parser.parse(request.time)
+            if event_time_utc.tzinfo is None:
+                event_time_utc = event_time_utc.replace(tzinfo=utc)
+            event_time_kst = event_time_utc.astimezone(kst)
+            
+            # 알림 시간 설정 (이벤트 10분 전)
+            scheduled_time = event_time_kst - timedelta(minutes=10)
+            
+            job_id = f"star_event_{request.eventId}"
+            scheduler.add_job(
+                star_event,
+                'date',
+                run_date=scheduled_time,
+                id=job_id,
+                args=[request],
+                replace_existing=True
+            )
+            
+            print(f"현재 시간 (KST): {current_time}")
+            print(f"이벤트 시간 (KST): {event_time_kst}")
+            print(f"예약 시간 (KST): {scheduled_time}")
+            
+            return {"message": f"알림이 {scheduled_time}에 예약되었습니다"}
+            
+        except Exception as e:
+            print(f"오류 발생: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
     else:
-        return {"message": "Star event not scheduled, 'starred' is False"}
-
-async def star_event_task(request: StarEventRequest):
-    # 실제 star_event 실행
-    await star_event(request)
+        job_id = f"star_event_{request.eventId}"
+        scheduler.remove_job(job_id)
+        return {"message": "알림이 취소되었습니다"}
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):
@@ -226,6 +259,5 @@ async def star_event_task(request: StarEventRequest):
 #         await websocket.send_text(f"Message received: {data}")
 
 if __name__ == "__main__":
-    import uvicorn
-    print("FastAPI 서버 실행")
+    print("FastAPI 서버 시작")
     uvicorn.run(app, host="0.0.0.0", port=8000)

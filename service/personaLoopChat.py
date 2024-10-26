@@ -82,28 +82,21 @@ Use the following format STRICTLY:
 Question: {input}
 Thought: you should always think about what to do before taking an action
 Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action, should be a valid JSON string using double quotes.
+Action Input: the input to the action
 Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know what to say
-Final Answer: 
-Response 1: [핵심 정보/데이터를 한국어로 답변]
-Response 2: [Response 1에 대한 부가 설명이나 의미를 한국어로 설명]
-Response 3: [사용자와 관련된 개인적인 질문이나 제안을 한국어로 제공]
+Final Answer: [여기에 최종 응답을 작성하세요. 다음 형식을 사용하세요:]
 
-Remember to:
-1. Action Input must be a simple string in quotes (e.g., "weather forecast tomorrow")
-2. ALWAYS provide at least 2 responses in Korean
-3. Make responses flow naturally and connect with each other
-4. Response 1 should focus on facts and numbers
-5. Response 2 should explain the meaning or impact
-6. Response 3 should engage with the user personally
-7. Use the persona's tone and personality strictly
-8. Include occasional emojis
-9. ALWAYS use casual Korean (반말) in responses
-10. Reflect persona's personality in every response
-11. Match the speaking style with persona's example
-12. Keep the tone consistent with persona's characteristics
+Response: [필수 응답]
+Context: [선택적 부가 설명]
+Engagement: [선택적 후속 질문이나 제안]
+
+Remember:
+1. ALWAYS use the exact format above
+2. Each section (Response/Context/Engagement) should be clearly separated
+3. Response is mandatory, others are optional
+4. Keep responses in Korean and casual (반말)
+5. Match your persona's tone
 
 {agent_scratchpad}"""
 
@@ -120,7 +113,8 @@ agent_executor = AgentExecutor(
     tools=tools,
     verbose=True,
     handle_parsing_errors=True,
-    max_iterations=15,
+    max_iterations=10,
+    early_stopping_method="generate",
     return_intermediate_steps=True
 )
 
@@ -180,14 +174,13 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
         
         print("=== Debug Logs ===")
         print("Raw output:", output)
-        
         # 사용자 입력 먼저 저장
         chat_ref = db.collection('chats').document(uid).collection('personas').document(persona_name).collection('messages')
-        # Response 패턴 찾기
-        response_pattern = r'Response \d+: (.*?)(?=Response \d+:|Final Answer:|$)'
+        # 수정된 Response 패턴
+        response_pattern = r'(?:Response|Context|Engagement): (.*?)(?=(?:Response|Context|Engagement):|Final Answer:|$)'
         responses = re.findall(response_pattern, output, re.DOTALL)
         
-          # 응답이 없는 경우 기본 응답 저장
+        # 응답이 없는 경우 기본 응답 저장
         if not responses:
             default_response = "죄송해요, 잠시 생각이 필요해요... 다시시도해주세요... 🤔"
             chat_ref.add({
@@ -196,12 +189,12 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 'message': default_response
             })
             return {"message": "Default response saved successfully"}
-            
-        # 응답이 있는 경우 각 응답을 딜레이와 함께 저장
-        for i, response_text in enumerate(responses):
+        
+        # 응답 저장
+        for response_text in responses:
             cleaned_response = response_text.strip()
             if cleaned_response:
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)  # 딜레이 시간 단축
                 chat_ref.add({
                     "timestamp": firestore.SERVER_TIMESTAMP,
                     'sender': persona_name,

@@ -95,16 +95,21 @@ agent_executor = AgentExecutor(
 
 
 async def star_event(request: StarEventRequest):
-    # 요청 처리 부분에서 userPhone을 꺼내올 때
-    user_phone = request.userPhone.replace("-", "")  # 하이픈 제거
-    if(request.starred):
-        agent_executor.invoke({
-            "input": f"사용자가 캘린더에 중요 표시한 이벤트 '{request.eventId}'가 곧 시작됩니다. '{user_phone}'에게 30자 내외로 문자를 보내세요. 이 문자는 중요한 일정임을 알리고 확인을 독려하는 내용입니다. 페르소나의 말투를 섞어 보내주세요",  
-            "uid": request.uid,
-            "persona_name": "Joy",
-            "persona_description": personas["Joy"]["description"],
-            "persona_tone": personas["Joy"]["tone"],
-            "persona_example": personas["Joy"]["example"]
-        })
-
-    return {"message": "Event starred successfully."}
+    try:
+        user_phone = request.userPhone.replace("-", "")
+        if request.starred:
+            print(f"문자 발송 시작: {datetime.now()}")
+            result = await agent_executor.ainvoke({
+                "input": f"사용자가 캘린더에 중요 표시한 이벤트 '{request.eventId}'가 곧 시작됩니다. '{user_phone}'에게 30자 내외로 문자를 보내세요. 이 문자는 중요한 일정임을 알리고 확인을 독려하는 내용입니다. 페르소나의 말투를 섞어 보내주세요",  
+                "uid": request.uid,
+                "persona_name": "Joy",
+                "persona_description": personas["Joy"]["description"],
+                "persona_tone": personas["Joy"]["tone"],
+                "persona_example": personas["Joy"]["example"]
+            })
+            print(f"문자 발송 완료: {datetime.now()}")
+            print(f"Agent 실행 결과: {result}")
+            return {"message": "Event notification sent successfully"}
+    except Exception as e:
+        print(f"문자 발송 중 오류 발생: {str(e)}")
+        raise e

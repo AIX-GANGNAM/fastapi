@@ -20,71 +20,62 @@ import re
 import json
 from firebase_admin import firestore
 from database import db
+from langchain_ollama import OllamaLLM  # 새로운 import 문
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+
 # Local Sllm API URL 설정
 LLAMA_API_URL = "http://localhost:1234/v1/chat/completions"
 
-# exaone-3.0-7.8b-instruct API로 중요도를 계산하는 함수
+# Ollama 대신 OllamaLLM 사용
+llm = OllamaLLM(
+    model="llama2",
+    base_url="http://localhost:11434"
+)
+
 def calculate_importance_llama(content):
-    prompt = f"""
-다음 대화 내용의 중요성을 설명이나 추가 텍스트 없이 1에서 10까지 숫자로 평가해 주세요. 응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트가 포함되면 응답은 무효로 처리됩니다. 반드시 1에서 10 사이의 정수만 반환해주세요.
+    prompt = PromptTemplate(
+        input_variables=["content"],
+        template="""다음 대화 내용의 중요성을 설명이나 추가 텍스트 없이 1에서 10까지 숫자로 평가해 주세요. 
+        응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트가 포함되면 응답은 무효로 처리됩니다. 
+        반드시 1에서 10 사이의 정수만 반환해주세요.
 
-대화 내용:
-"{content}"
-"""
-
-
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "model": "exaone",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1
-    }
-    response = requests.post(LLAMA_API_URL, json=data, headers=headers)
-
-    if response.status_code == 200:
-        result = response.json()
-        try:
-            # 정규식을 사용하여 1~10 사이의 숫자만 추출
-            importance = re.search(r'\b([1-9]|10)\b', result['choices'][0]['message']['content'])
-            if importance:
-                return int(importance.group())
-            else:
-                print(f"유효하지 않은 중요도 값. 기본값 5를 사용합니다.")
-                return 5
-        except (AttributeError, ValueError):
-            print(f"중요도를 숫자로 변환할 수 없습니다: {result}. 기본값 5를 사용합니다.")
+        대화 내용:
+        "{content}"
+        """
+    )
+    
+    chain = LLMChain(llm=llm, prompt=prompt)
+    result = chain.invoke({"content": content})
+    
+    try:
+        importance = re.search(r'\b([1-9]|10)\b', result['text'])
+        if importance:
+            return int(importance.group())
+        else:
+            print(f"유효하지 않은 중요도 값. 기본값 5를 사용합니다.")
             return 5
-    else:
-        print(f"Llama API 호출 실패: {response.status_code} - {response.text}")
+    except (AttributeError, ValueError):
+        print(f"중요도를 숫자로 변환할 수 없습니다: {result}. 기본값 5를 사용합니다.")
         return 5
 
-# exaone-3.0-7.8b-instruct API로 요약하는 함수
 def summarize_content(content):
-    prompt = f"""
-다음 대화 내용을 한두 문장으로 요약만 하세요. 반드시 요약만 입력하세요. 불필요한 설명이나 추가 텍스트는 절대 입력하지 마세요. 요약 외의 모든 응답은 무효로 처리됩니다. 반드시 짧고 간결하게 요약만 해주세요.
+    prompt = PromptTemplate(
+        input_variables=["content"],
+        template="""다음 대화 내용을 한두 문장으로 요약만 하세요. 
+        반드시 요약만 입력하세요. 불필요한 설명이나 추가 텍스트는 절대 입력하지 마세요. 
+        요약 외의 모든 응답은 무효로 처리됩니다. 반드시 짧고 간결하게 요약만 해주세요.
 
-대화 내용:
-"{content}"
+        대화 내용:
+        "{content}"
 
-요약:
-"""
-
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "model": "exaone",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5
-    }
-
-    response = requests.post(LLAMA_API_URL, json=data, headers=headers)
-
-    if response.status_code == 200:
-        result = response.json()
-        summary = result['choices'][0]['message']['content'].strip()
-        return summary
-    else:
-        print(f"Llama API 호출 실패: {response.status_code} - {response.text}")
-        return content  # 요약 실패 시 원본 반환
+        요약:
+        """
+    )
+    
+    chain = LLMChain(llm=llm, prompt=prompt)
+    result = chain.invoke({"content": content})
+    return result['text'].strip()
 
 def get_long_term_memory_tool(params):
     if isinstance(params, dict):
@@ -401,9 +392,6 @@ Thought:{agent_scratchpad}
 
 prompt = ChatPromptTemplate.from_template(template)
 
-# LLM 모델 정의
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
 # 페르소나별 에이전트 생성
 agents = {}
 # 프롬프트에 페르소나 설명, 톤, 예시를 넣도록 에이전트를 정의하는 부분 수정
@@ -517,6 +505,9 @@ async def simulate_conversation(request: PersonaChatRequest):
 # )
 
 # simulate_conversation(chat_request)
+
+
+
 
 
 
