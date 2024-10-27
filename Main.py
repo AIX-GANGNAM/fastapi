@@ -37,14 +37,13 @@ from fastapi import WebSocket
 #     get_all_agents,
 #     AgentManager  # 에이전트 관리를 위한 클래스
 # )
-import asyncio
-# from service.personaChatVer2 import persona_chat_v2
+from service.personaLoopChat import persona_chat_v2
 from service.personaChatVer3 import simulate_conversation
 from service.smsservice import send_sms_service
 from service.personaSms import star_event
 import uvicorn
 from pytz import timezone
-
+from personaDebate import run_persona_debate
 
 
 # 스케줄러 초기화
@@ -59,14 +58,14 @@ scheduler = AsyncIOScheduler(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 이벤트 루프 설정
-    loop = asyncio.get_event_loop()
+    # 애플리케이션 시작 시
     try:
-        scheduler.start(paused=False)
+        scheduler.start()
         print("스케줄러가 시작되었습니다.")
     except Exception as e:
         print(f"스케줄러 시작 중 오류 발생: {str(e)}")
     yield
+    # 애플리케이션 종료 시
     try:
         scheduler.shutdown()
         print("스케줄러가 종료되었습니다.")
@@ -214,41 +213,50 @@ async def star_event_endpoint(request: StarEventRequest):
     if request.starred:
         try:
             kst = pytz.timezone('Asia/Seoul')
-            utc = pytz.UTC
-            current_time = datetime.now(kst)
             
-            # UTC 시간을 KST로 변환
-            event_time_utc = parser.parse(request.time)
-            if event_time_utc.tzinfo is None:
-                event_time_utc = event_time_utc.replace(tzinfo=utc)
-            event_time_kst = event_time_utc.astimezone(kst)
-            
-            # 알림 시간 설정 (이벤트 10분 전)
+            # ISO 8601 시간 문자열을 파싱
+            event_time = parser.parse(request.time)
+            event_time_kst = event_time.astimezone(kst)
             scheduled_time = event_time_kst - timedelta(minutes=10)
             
             job_id = f"star_event_{request.eventId}"
+            
+            async def scheduled_task():
+                try:
+                    print(f"토론 시작 (KST): {datetime.now(kst)}")
+                    result = await run_persona_debate(request)  # 토론 후 sms 보내는 함수
+                    print(f"토론 완료 (KST): {datetime.now(kst)}")
+                    return result
+                except Exception as e:
+                    print(f"토론 실행 중 오류: {str(e)}")
+                    raise e
+            
+            # 기존 작업이 있다면 제거
+            if scheduler.get_job(job_id):
+                scheduler.remove_job(job_id)
+            
             scheduler.add_job(
-                star_event,
+                scheduled_task,
                 'date',
                 run_date=scheduled_time,
                 id=job_id,
-                args=[request],
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=300
             )
             
-            print(f"현재 시간 (KST): {current_time}")
-            print(f"이벤트 시간 (KST): {event_time_kst}")
+            print(f"토론 예약됨 - ID: {job_id}")
             print(f"예약 시간 (KST): {scheduled_time}")
-            
-            return {"message": f"알림이 {scheduled_time}에 예약되었습니다"}
+            return {"message": f"페르소나 토론이 {scheduled_time}에 예약되었습니다"}
             
         except Exception as e:
-            print(f"오류 발생: {str(e)}")
+            print(f"스케줄 등록 중 오류 발생: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
     else:
         job_id = f"star_event_{request.eventId}"
-        scheduler.remove_job(job_id)
-        return {"message": "알림이 취소되었습니다"}
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+            return {"message": "예약된 토론이 취소되었습니다"}
+        return {"message": "취소할 토론이 없습니다"}
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):
