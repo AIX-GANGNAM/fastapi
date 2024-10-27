@@ -57,7 +57,7 @@ class TaskRequest(BaseModel):
 
 # 요청으로 들어오는 데이터를 위한 Pydantic 모델
 class SmsRequest(BaseModel):
-    phone_number: str
+    phone_number: str # ex) 01012345678
     message: str  # 사용자 정의 메시지
 
 class StarEventRequest(BaseModel):
