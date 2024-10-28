@@ -79,24 +79,20 @@ You have access to the following tools:
 
 Use the following format STRICTLY:
 
-Question: {input}
-Thought: you should always think about what to do before taking an action
+Question: the input question you must answer
+Thought: you should always think about what to do
 Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
+Action Input: the input to the action (must be a valid JSON string)
 Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know what to say
-Final Answer: [여기에 최종 응답을 작성하세요. 다음 형식을 사용하세요:]
+Final Answer: your response in the following format:
 
-Response: [필수 응답]
-Context: [선택적 부가 설명]
-Engagement: [선택적 후속 질문이나 제안]
+Response: [your main response in Korean]
+Context: [optional additional context]
+Engagement: [optional follow-up question]
 
-Remember:
-1. ALWAYS use the exact format above
-2. Each section (Response/Context/Engagement) should be clearly separated
-3. Response is mandatory, others are optional
-4. Keep responses in Korean and casual (반말)
-5. Match your persona's tone
+Remember to maintain consistent formatting and use proper JSON
 
 {agent_scratchpad}"""
 
@@ -114,7 +110,6 @@ agent_executor = AgentExecutor(
     verbose=True,
     handle_parsing_errors=True,
     max_iterations=10,
-    early_stopping_method="generate",
     return_intermediate_steps=True
 )
 
@@ -162,7 +157,7 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
             "persona_example": personas[persona_name]["example"],
             "conversation_history": conversation_history,
             "tools": render_text_description(tools),
-            "tool_names": [tool.name for tool in tools],
+            "tool_names": ", ".join([tool.name for tool in tools]),
             "agent_scratchpad": "",
             "uid": uid,
             "user_profile": user_profile
