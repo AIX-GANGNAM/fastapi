@@ -95,16 +95,19 @@ class CommentDebateRound:
         
     def initialize_debate(self):
         debate_ref = db.collection('personachat').document(self.request.uid)\
-            .collection('feed_debates').document()
+            .collection('debates').document()
+        
+        topic = f"피드 '{self.request.caption[:20]}...'에 대한 댓글 토론"
         
         debate_ref.set({
+            'title': topic,
             'feed_id': self.request.feed_id,
-            'image_description': self.request.image_description,
-            'caption': self.request.caption,
             'createdAt': firestore.SERVER_TIMESTAMP,
             'status': 'in_progress',
-            'selected_personas': [],
-            'selection_reasons': {}
+            'finalSender': None,
+            'finalMessage': None,
+            'selectionReason': None,
+            'selected_personas': []
         })
         self.debate_ref = debate_ref
 
@@ -112,26 +115,35 @@ class CommentDebateRound:
         if len(text) > 200:
             text = text[:197] + "..."
             
+        current_time = firestore.SERVER_TIMESTAMP
         speaker_name = "진행자" if speaker == "Moderator" else personas[speaker]['realName']
         
-        message_data = {
+        self.debate_ref.collection('messages').add({
             'speaker': speaker,
             'speakerName': speaker_name,
             'text': text,
             'messageType': message_type,
-            'timestamp': firestore.SERVER_TIMESTAMP,
+            'timestamp': current_time,
             'isRead': True,
             'charCount': len(text)
-        }
+        })
         
-        self.debate_ref.collection('messages').add(message_data)
-        self.debate_history.append(DebateMessage(speaker, text))
+        message = DebateMessage(speaker, text)
+        self.debate_history.append(message)
         
         print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({speaker_name})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"{text}")
         print(f"글자 수: {len(text)}자")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    def update_debate_result(self, selected_personas: List[str], selection_reasons: dict):
+        self.debate_ref.update({
+            'status': 'completed',
+            'selected_personas': selected_personas,
+            'selection_reasons': selection_reasons,
+            'completedAt': firestore.SERVER_TIMESTAMP
+        })
 
 async def create_persona_feed_response(name: str, request: FeedCommentRequest) -> str:
     """각 페르소나의 의견 생성"""
@@ -366,7 +378,7 @@ feed_debate_template = """당신은 5명의 페르소나가 토론하는 것을 
 
 당신의 역할:
 1. 각 페르소나의 의견을 평가하여 점수 부여 (0.0 ~ 1.0)
-2. 0.7점 이상의 페르소나를 선정 (최대 3명)
+2. 0.7점 이상의 페소나를 선정 (최대 3명)
 3. 선정된 페르소나별로 댓글 작성 방향 제시
 
 평가 기준:
@@ -468,7 +480,7 @@ async def run_comment_debate(request: FeedCommentRequest):
             
             # 결과 출력
             print("\n✨ 토론 결과")
-            print("━━━━━━━━���━━━━━━━━━━━━━━━━━━")
+            print("━━━━━━━━━━━━━━━━━━━━━━━━━━")
             print("📊 평가 점수:")
             for persona, score in final_data['scores'].items():
                 print(f"- {persona}({personas[persona]['realName']}): {score:.2f}점")
@@ -541,3 +553,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
