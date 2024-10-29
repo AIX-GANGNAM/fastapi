@@ -5,7 +5,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2
-from service.services import send_expo_push_notification
 import logging
 import requests
 from service.services import (
@@ -85,6 +84,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 디바이스 - EndPoint 네트워크 통신 
+@app.get("/v2/networkcheck")
+async def network_check():
+    try:
+        return {
+            "status": "success",
+            "message": "서버가 정상적으로 응답합니다",
+            "timestamp": str(datetime.now())
+        }
+    except Exception as e:
+        logging.error(f"네트워크 체크 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 스케줄러 상태 확인 엔드포인트
 @app.get("/scheduler-status")
@@ -104,17 +115,6 @@ async def get_scheduler_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/networkcheck")
-async def network_check():
-    try:
-        return {
-            "status": "success",
-            "message": "서버가 정상적으로 응답합니다",
-            "timestamp": str(datetime.now())
-        }
-    except Exception as e:
-        logging.error(f"네트워크 체크 에러: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
@@ -127,7 +127,6 @@ async def chat_endpoint(chat_request: ChatRequest):
     persona_name = response['persona_name']
     response_text = response['response']
     
-    send_expo_push_notification(uid, persona_name, response_text)
     
     # ChatResponse 모델에 맞게 반환
     return ChatResponse(persona_name=persona_name, response=response_text)

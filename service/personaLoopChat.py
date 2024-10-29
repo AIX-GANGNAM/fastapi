@@ -18,7 +18,7 @@ import re
 from fastapi import HTTPException
 from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_memory_tool, get_user_profile, get_user_events, save_user_event
 import asyncio
-from service.services import send_expo_push_notification
+from service.sendNofiticaion import send_expo_push_notification 
 
 model = ChatOpenAI(model="gpt-4o",temperature=0.5)
 web_search = TavilySearchResults(max_results=1)
@@ -185,8 +185,8 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 'sender': persona_name,
                 'message': default_response
             })
-            await send_expo_push_notification(uid, persona_name, default_response, "Chat")
-            print(f"persona_chat_v2 >Notification: {notification}")  
+            notification = await send_expo_push_notification(uid, persona_name, default_response, "Chat")
+            print(f"persona_chat_v2 >Notification (기본 응답 저장): {notification}")  
             return {"message": "Default response saved successfully"}
         
         # 응답 저장
@@ -200,7 +200,7 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                     'message': cleaned_response
                 })
                 notification = await send_expo_push_notification(uid, persona_name, cleaned_response, "Chat")
-                print(f"persona_chat_v2 > Notification: {notification}")
+                print(f"persona_chat_v2 > Notification (채팅 메시지 저장): {notification}")
         return {"message": "Conversation completed successfully"}
         
     except Exception as e:
