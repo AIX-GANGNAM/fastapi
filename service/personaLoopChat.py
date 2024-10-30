@@ -18,6 +18,8 @@ import re
 from fastapi import HTTPException
 from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_memory_tool, get_user_profile, get_user_events, save_user_event
 import asyncio
+from service.sendNofiticaion import send_expo_push_notification 
+from models import NotificationRequest
 from service.interactionStore import store_user_interaction
 
 model = ChatOpenAI(model="gpt-4o",temperature=0.5)
@@ -229,8 +231,14 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 'sender': persona_name,
                 'message': default_response
             })
-            await send_expo_push_notification(uid, persona_name, default_response, "Chat")
-            print(f"persona_chat_v2 >Notification: {notification}")  
+            notification_request = NotificationRequest(
+                uid=uid, 
+                whoSendMessage=persona_name, 
+                message=default_response, 
+                pushType="persona_chat"
+            )
+            notification = await send_expo_push_notification(notification_request)   
+            print(f"persona_chat_v2 >Notification (기본 응답 저장): {notification}")  
             return {"message": "Default response saved successfully"}
         
 
@@ -247,17 +255,23 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                     'message': cleaned_response
                 })
 
-                
+                notification_request = NotificationRequest(
+                    uid=uid, 
+                    whoSendMessage=persona_name, 
+                    message=cleaned_response, 
+                    pushType="persona_chat"
+                )
+                notification = await send_expo_push_notification(notification_request)
+                print(f"persona_chat_v2 > Notification (채팅 메시지 저장): {notification}")
+
+             
                 # 단기 기억에 저장 (Redis)
                 store_short_term_memory(
                     uid=uid,
                     persona_name=actual_persona_name,  # 'custom' 사용
                     memory=f"{display_name}: {cleaned_response}"  # '피카츄: 메시지' 형식으로 저장
                 )
-        
 
-                notification = await send_expo_push_notification(uid, persona_name, cleaned_response, "Chat")
-                print(f"persona_chat_v2 > Notification: {notification}")
 
         return {"message": "Conversation completed successfully"}
         
