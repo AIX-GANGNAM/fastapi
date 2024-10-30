@@ -44,7 +44,6 @@ profile_chain = LLMChain(llm=gpt4_model, prompt=profile_prompt)
 
 async def update_clone_personality(profile: UserProfile):
     try:
-        # Firestore에서 사용자 문서 가져오기
         user_ref = db.collection('users').document(profile.uid)
         user_doc = user_ref.get()
         
@@ -53,7 +52,7 @@ async def update_clone_personality(profile: UserProfile):
         
         user_data = user_doc.to_dict()
         personas = user_data.get('persona', [])
-        user_name = user_data.get('profile', {}).get('userName', '사용자')
+        user_name = user_data.get('userName', '사용자')
         
         # LLM을 통한 페르소나 생성
         result = profile_chain.invoke({
@@ -87,28 +86,35 @@ async def update_clone_personality(profile: UserProfile):
                 elif current_section:
                     sections[current_section] += ' ' + line
         
-        # 업데이트된 clone 페르소나
-        updated_clone = {
-            "Name": "clone",
-            "DPNAME": f"{user_name}의 분신",
-            "description": sections.get('description', ''),
-            "tone": sections.get('tone', ''),
-            "example": sections.get('example', '')
-        }
-        
         # 기존 페르소나 업데이트
         updated_personas = []
         clone_updated = False
         
         for persona in personas:
             if persona.get('Name') == 'clone':
-                updated_personas.append(updated_clone)
+                # 기존 persona 객체를 유지하면서 필요한 필드만 업데이트
+                updated_persona = persona.copy()  # 기존 데이터 복사
+                updated_persona.update({          # 필요한 필드만 업데이트
+                    "DPNAME": f"{user_name}의 분신",
+                    "description": sections.get('description', ''),
+                    "tone": sections.get('tone', ''),
+                    "example": sections.get('example', '')
+                })
+                updated_personas.append(updated_persona)
                 clone_updated = True
             else:
                 updated_personas.append(persona)
         
         if not clone_updated:
-            updated_personas.append(updated_clone)
+            # 새로운 clone 생성 시에만 전체 필드 설정
+            new_clone = {
+                "Name": "clone",
+                "DPNAME": f"{user_name}의 분신",
+                "description": sections.get('description', ''),
+                "tone": sections.get('tone', ''),
+                "example": sections.get('example', '')
+            }
+            updated_personas.append(new_clone)
         
         # Firestore 업데이트
         user_ref.update({
@@ -117,7 +123,7 @@ async def update_clone_personality(profile: UserProfile):
         
         return {
             "message": "분신 페르소나가 성공적으로 업데이트되었습니다",
-            "data": updated_clone
+            "data": updated_personas[-1]  # 업데이트된 clone 반환
         }
         
     except Exception as e:
