@@ -11,6 +11,9 @@ class ChatRequestV2(BaseModel):
     uid: str
     persona_name: str
     user_input: str
+    tone: str | None = None        # Optional
+    example: str | None = None     # Optional
+    description: str | None = None # Optional
 
 class ChatResponse(BaseModel):
     persona_name: str
@@ -84,3 +87,8 @@ class UserProfile(BaseModel):
     emoji_style: str
     values: List[str]
     decision_style: str
+
+class CommentInteraction(BaseModel):
+    uid: str
+    content: str
+    interaction_type: str

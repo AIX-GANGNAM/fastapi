@@ -24,6 +24,7 @@ from models import AllPersonasSchedule, PersonaSchedule, ScheduleItem
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from personaCommentDebate import run_comment_debate, FeedCommentRequest
+from interactionStore import store_user_interaction
 # OpenAI 객체를 생성합니다.
 model = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
 
@@ -363,6 +364,13 @@ async def create_feed_post(post):
             embeddings=[embedding],
             metadatas=[{"post_id": post.id, "created_at": post.createdAt}],
             ids=[post.id]
+        )
+
+        # 사용자 메시지 저장 (채팅 시작 부분에 추가)
+        await store_user_interaction(
+            uid=post.userId,
+            message=post.caption,
+            interaction_type='feed'
         )
 
         # 댓글 생성 요청

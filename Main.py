@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
-from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile
+from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile, CommentInteraction
 from service.services import send_expo_push_notification
 import logging
 import requests
@@ -48,6 +48,8 @@ from personaDebate import run_persona_debate
 
 from service.personaGenerate import generate_personality
 from service.profileUpdate import update_clone_personality
+from service.interactionStore import store_user_interaction
+
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -295,6 +297,17 @@ async def generate_personality_endpoint(request: GeneratePersonalityRequest):
 @app.post("/update-personality")
 async def update_personality_endpoint(request: UserProfile):
     return await update_clone_personality(request)
+
+@app.post("/store-comment-interaction")
+async def store_comment_interaction(comment_data: CommentInteraction):
+    """
+    댓글 작성 시 사용자 상호작용을 저장하는 엔드포인트
+    """
+    return await store_user_interaction(
+        uid=comment_data.uid,
+        message=comment_data.content,
+        interaction_type=comment_data.interaction_type
+    )
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):
