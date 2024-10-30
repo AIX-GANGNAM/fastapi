@@ -18,11 +18,7 @@ import re
 from fastapi import HTTPException
 from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_memory_tool, get_user_profile, get_user_events, save_user_event
 import asyncio
-
 from service.interactionStore import store_user_interaction
-
-from service.services import send_expo_push_notification
-
 
 model = ChatOpenAI(model="gpt-4o",temperature=0.5)
 web_search = TavilySearchResults(max_results=1)

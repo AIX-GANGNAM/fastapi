@@ -24,7 +24,7 @@ from models import AllPersonasSchedule, PersonaSchedule, ScheduleItem
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from personaCommentDebate import run_comment_debate, FeedCommentRequest
-from interactionStore import store_user_interaction
+from service.interactionStore import store_user_interaction
 # OpenAI 객체를 생성합니다.
 model = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
 
