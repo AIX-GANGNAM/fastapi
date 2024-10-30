@@ -10,7 +10,7 @@ import asyncio
 from typing import List, Dict
 import pytz
 from personas import personas
-from service.personaChatVer3 import get_long_term_memory_tool, get_user_profile, get_user_events
+from service.personaChatVer3 import get_long_term_memory_tool, get_user_profile, get_user_events, calculate_importance_llama, summarize_content, store_short_term_memory, store_long_term_memory
 from database import db
 from firebase_admin import firestore
 from service.smsservice import send_sms_service  # 상단에 import 추가
@@ -51,27 +51,45 @@ class DebateRound:
         })
         self.debate_ref = debate_ref
         
-    def add_to_history(self, speaker: str, text: str, message_type: str = "opinion"):
-        if len(text) > 200:
-            text = text[:197] + "..."
-            
-        current_time = firestore.SERVER_TIMESTAMP
-        speaker_name = "진행자" if speaker == "Moderator" else personas[speaker]['realName']
-        
-        self.debate_ref.collection('messages').add({
-            'speaker': speaker,
-            'speakerName': speaker_name,
-            'text': text,
-            'messageType': message_type,
-            'timestamp': current_time,
-            'isRead': True,
-            'charCount': len(text)
-        })
-        
+    def add_to_history(self, speaker: str, text: str, message_type: str = "message"):
+        """토론 히스토리에 메시지 추가 및 메모리 저장"""
         message = DebateMessage(speaker, text)
         self.debate_history.append(message)
         
-        print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({speaker_name})")
+        # Firestore에 메시지 저장
+        if self.debate_ref:
+            self.debate_ref.collection('messages').add({
+                'speaker': speaker,
+                'text': text,
+                'type': message_type,
+                'timestamp': message.timestamp,
+                'isRead': message.isRead
+            })
+        
+        # 페르소나의 발언인 경우에만 메모리 저장
+        if speaker != "Moderator":
+            # 단기 기억에 저장
+            store_short_term_memory(
+                self.request.uid, 
+                speaker, 
+                f"{speaker}: {text}"
+            )
+            
+            # 중요도 계산
+            importance = calculate_importance_llama(text)
+            
+            # 중요도가 8 이상이면 장기 기억에 저장
+            if importance >= 5:
+                # 요약 생성
+                summary = summarize_content(text)
+                # 장기 기억에 저장
+                store_long_term_memory(
+                    self.request.uid,
+                    speaker,
+                    summary
+                )
+        
+        print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({personas[speaker]['realName']})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"{text}")
         print(f"글자 수: {len(text)}자")
@@ -275,7 +293,7 @@ async def run_persona_debate(event_request: StarEventRequest):
         f"[이벤트 분석]\n"
         f"일정: {event_request.eventId}\n"
         f"시간: {formatted_time}\n\n"
-        f"이벤트 특성 고려사항:\n"
+        f"이���트 특성 고려사항:\n"
         f"1. 이벤트의 성격과 중요도\n"
         f"2. 시간 관리의 중요성\n"
         f"3. 필요한 준비사항\n"

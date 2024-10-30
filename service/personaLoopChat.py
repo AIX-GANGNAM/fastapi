@@ -20,6 +20,7 @@ from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_me
 import asyncio
 from service.sendNofiticaion import send_expo_push_notification 
 from models import NotificationRequest
+from service.interactionStore import store_user_interaction
 
 model = ChatOpenAI(model="gpt-4o",temperature=0.5)
 web_search = TavilySearchResults(max_results=1)
@@ -39,7 +40,7 @@ tools = [
     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
-        description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
+        description="ChromaDB에서 종합적인 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
     ),
     Tool(
         name="Short Term Memory",
@@ -63,7 +64,7 @@ tools = [
     ),
 ]
 
-template = """You are {persona_name}, having a conversation with the user.
+template = """You are {persona_name}, having a natural conversation with the user.
 Your personality traits:
 - Description: {persona_description}
 - Tone: {persona_tone}
@@ -76,8 +77,23 @@ Previous conversation:
 
 Current user message: {input}
 
+IMPORTANT CONVERSATION RULES:
+1. You must generate THREE natural responses in sequence, like a real conversation flow
+2. Each response should build upon the previous one naturally
+3. Use casual, friendly Korean language appropriate for your character
+4. Show natural reactions and emotions
+5. Include appropriate gestures and expressions
+6. React to what the user says before moving to new topics
+
+Example natural conversation flow:
+User: 오늘 너무 피곤해
+Response1: 어머, 그렇구나...
+Response2: 내가 볼때는 좀 쉬어야 할 것 같은데!
+
 You have access to the following tools:
 {tools}
+
+When using Long Term Memory or Short Term Memory tools, use "{actual_persona_name}" as the persona_name.
 
 Use the following format STRICTLY:
 
@@ -90,11 +106,16 @@ Observation: the result of the action
 Thought: I now know what to say
 Final Answer: your response in the following format:
 
-Response: [your main response in Korean]
-Context: [optional additional context]
-Engagement: [optional follow-up question]
+Response1: [First natural response with emotion/gesture]
+Response2: [Follow-up response building on the previous one]
+Response3: [Final response to complete the conversation flow]
 
-Remember to maintain consistent formatting and use proper JSON
+Remember:
+- Act like you're having a real conversation
+- Show genuine emotions and reactions
+- Use your character's unique expressions
+- Keep the flow natural and engaging
+- React to user's emotions and context
 
 {agent_scratchpad}"""
 
@@ -150,14 +171,31 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
         user_doc = db.collection('users').document(uid).get()
         user_profile = user_doc.to_dict().get('profile', {}) if user_doc.exists else {}
         
-        conversation_history = get_conversation_history(uid, persona_name)
+        # 사용자의 페르소나 정보 가져오기
+        personas = user_doc.to_dict().get('persona', [])
+        current_persona = next(
+            (p for p in personas if p.get('Name') == persona_name),
+            None
+        )
+        
+        if not current_persona:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Persona {persona_name} not found"
+            )
+        
+        # persona_name을 실제 Name 값으로 변경
+        actual_persona_name = current_persona.get('Name')
+        display_name = current_persona.get('DPNAME')
+        conversation_history = get_conversation_history(uid, actual_persona_name)
         
         agent_input = {
             "input": user_input,
-            "persona_name": persona_name,
-            "persona_description": personas[persona_name]["description"],
-            "persona_tone": personas[persona_name]["tone"],
-            "persona_example": personas[persona_name]["example"],
+            "persona_name": display_name,
+            "actual_persona_name": actual_persona_name,
+            "persona_description": current_persona.get('description', ''),
+            "persona_tone": current_persona.get('tone', ''),
+            "persona_example": current_persona.get('example', ''),
             "conversation_history": conversation_history,
             "tools": render_text_description(tools),
             "tool_names": ", ".join([tool.name for tool in tools]),
@@ -165,6 +203,13 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
             "uid": uid,
             "user_profile": user_profile
         }
+        
+        # 사용자 메시지 저장 (채팅 시작 부분에 추가)
+        await store_user_interaction(
+            uid=chat_request.uid,
+            message=chat_request.user_input,
+            interaction_type='chat'
+        )
         
         # 에이전트 실행
         response = await agent_executor.ainvoke(agent_input)
@@ -175,9 +220,9 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
         # 사용자 입력 먼저 저장
         chat_ref = db.collection('chats').document(uid).collection('personas').document(persona_name).collection('messages')
         # 수정된 Response 패턴
-        response_pattern = r'(?:Response|Context|Engagement): (.*?)(?=(?:Response|Context|Engagement):|Final Answer:|$)'
+        response_pattern = r'Response(\d+): (.*?)(?=Response\d+:|$)'
         responses = re.findall(response_pattern, output, re.DOTALL)
-        
+
         # 응답이 없는 경우 기본 응답 저장
         if not responses:
             default_response = "죄송해요, 잠시 생각이 필요해요... 다시시도해주세요... 🤔"
@@ -196,16 +241,20 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
             print(f"persona_chat_v2 >Notification (기본 응답 저장): {notification}")  
             return {"message": "Default response saved successfully"}
         
+
         # 응답 저장
-        for response_text in responses:
+        for _, response_text in sorted(responses):
             cleaned_response = response_text.strip()
             if cleaned_response:
                 await asyncio.sleep(2)  # 딜레이 시간 단축
+                
+                # Firestore에 저장
                 chat_ref.add({
                     "timestamp": firestore.SERVER_TIMESTAMP,
                     'sender': persona_name,
                     'message': cleaned_response
                 })
+
                 notification_request = NotificationRequest(
                     uid=uid, 
                     whoSendMessage=persona_name, 
@@ -214,6 +263,16 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 )
                 notification = await send_expo_push_notification(notification_request)
                 print(f"persona_chat_v2 > Notification (채팅 메시지 저장): {notification}")
+
+             
+                # 단기 기억에 저장 (Redis)
+                store_short_term_memory(
+                    uid=uid,
+                    persona_name=actual_persona_name,  # 'custom' 사용
+                    memory=f"{display_name}: {cleaned_response}"  # '피카츄: 메시지' 형식으로 저장
+                )
+
+
         return {"message": "Conversation completed successfully"}
         
     except Exception as e:
