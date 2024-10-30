@@ -7,6 +7,8 @@ from apscheduler.triggers.date import DateTrigger
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2
 import logging
 import requests
+from models import NotificationRequest
+from service.sendNofiticaion import send_expo_push_notification
 from service.services import (
     chat_with_persona,
     get_personas,
@@ -32,7 +34,7 @@ from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
 # from villageServices import get_all_agents
-from fastapi import WebSocket
+from fastapi import WebSocket, Request   
 # from villageServices import (
 #     get_all_agents,
 #     AgentManager  # 에이전트 관리를 위한 클래스
@@ -86,7 +88,8 @@ app.add_middleware(
 )
 # 디바이스 - EndPoint 네트워크 통신 
 @app.get("/v2/networkcheck")
-async def network_check():
+async def network_check(request: Request):
+    print("@app.get > network_check 호출")
     try:
         return {
             "status": "success",
@@ -94,8 +97,8 @@ async def network_check():
             "timestamp": str(datetime.now())
         }
     except Exception as e:
-        logging.error(f"네트워크 체크 에러: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"네트워크 체크 에러: {str(e)} | 요청: {request.url}")
+        raise HTTPException(status_code=500, detail=f"서버 오류: {str(e)}")
 
 # 스케줄러 상태 확인 엔드포인트
 @app.get("/scheduler-status")
@@ -134,7 +137,12 @@ async def chat_endpoint(chat_request: ChatRequest):
 
 @app.post("/v2/chat")
 async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
-    return await persona_chat_v2(chat_request)
+    print("@app.post > persona_chat_v2_endpoint 호출")  
+    try:
+        return await persona_chat_v2(chat_request)
+    except Exception as e:
+        logging.error(f"채팅 처리 에러: {str(e)} | 요청 데이터: {chat_request}")
+        raise HTTPException(status_code=500, detail=f"채팅 처리 오류: {str(e)}")
 
 
 @app.get("/personas")
@@ -279,6 +287,10 @@ async def star_event_endpoint(request: StarEventRequest):
             scheduler.remove_job(job_id)
             return {"message": "예약된 토론이 취소되었습니다"}
         return {"message": "취소할 토론이 없습니다"}
+
+@app.post("/notification")
+async def notification_endpoint(request: NotificationRequest):
+    return await send_expo_push_notification(request)
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):

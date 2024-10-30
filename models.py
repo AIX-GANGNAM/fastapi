@@ -66,3 +66,9 @@ class StarEventRequest(BaseModel):
     starred: bool  # 별표 상태
     time: str  # ISO 8601 형식의 시간
     userPhone: str  # 사용자 전화번호 추가
+
+class NotificationRequest(BaseModel):
+    uid: str
+    whoSendMessage: str
+    message: str
+    pushType: str
