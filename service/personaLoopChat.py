@@ -37,7 +37,7 @@ tools = [
     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
-        description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
+        description="ChromaDB에서 종합적인 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
     ),
     Tool(
         name="Short Term Memory",

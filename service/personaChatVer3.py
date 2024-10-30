@@ -25,24 +25,38 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
 # Local Sllm API URL 설정
-LLAMA_API_URL = "http://localhost:1234/v1/chat/completions"
+LLAMA_API_URL = "http://http://192.168.0.119:11434/api/generate"
 
 # Ollama 대신 OllamaLLM 사용
 llm = OllamaLLM(
-    model="llama2",
-    base_url="http://localhost:11434"
+    model="jmpark333/exaone",
+    base_url="http://192.168.0.119:11434/"
 )
+
+# GPT-4 모델 추가
+gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
 def calculate_importance_llama(content):
     prompt = PromptTemplate(
         input_variables=["content"],
-        template="""다음 대화 내용의 중요성을 설명이나 추가 텍스트 없이 1에서 10까지 숫자로 평가해 주세요. 
-        응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트가 포함되면 응답은 무효로 처리됩니다. 
-        반드시 1에서 10 사이의 정수만 반환해주세요.
+        template="""시스템: 당신은 대화의 중요도를 평가하는 분석 시스템입니다. 
+        오직 1에서 10 사이의 정수만 출력해야 합니다.
+        
+        평가 기준:
+        1-3: 일상적인 대화, 인사, 가벼운 잡담
+        4-6: 개인적 경험, 감정 공유, 일반적인 의견 교환
+        7-8: 중요한 정보, 깊은 통찰, 강한 감정 표현
+        9-10: 매우 중요한 결정, 핵심 정보, 강력한 감정적 순간
 
-        대화 내용:
+        규칙:
+        1. 반드시 1에서 10 사이의 정수만 출력하세요
+        2. 다른 텍스트나 설명을 추가하지 마세요
+        3. 숫자 외의 모든 출력은 무시됩니다
+
+        분석할 대화:
         "{content}"
-        """
+
+        중요도 점수:"""
     )
     
     chain = LLMChain(llm=llm, prompt=prompt)
@@ -62,20 +76,37 @@ def calculate_importance_llama(content):
 def summarize_content(content):
     prompt = PromptTemplate(
         input_variables=["content"],
-        template="""다음 대화 내용을 한두 문장으로 요약만 하세요. 
-        반드시 요약만 입력하세요. 불필요한 설명이나 추가 텍스트는 절대 입력하지 마세요. 
-        요약 외의 모든 응답은 무효로 처리됩니다. 반드시 짧고 간결하게 요약만 해주세요.
+        template="""시스템: 당신은 대화 내용을 정확하고 간단히 요약하는 전문가입니다.
 
-        대화 내용:
+        요약 규칙:
+        1. 최대 50자 이내로 요약하세요
+        2. 핵심 내용과 감정만 포함하세요
+        3. 불필요한 설명이나 부연 설명을 제외하세요
+        4. 객관적이고 명확한 문장으로 작성하세요
+        5. 다음 형식을 반드시 지키세요: [감정/태도] + 핵심 메시지
+
+        예시:
+        입력: "나는 정말 화가 나! 어제 친구가 약속을 어겼어. 세 시간이나 기다렸다고!"
+        출력: [분노] 친구의 약속 불이행으로 3시간 대기
+
+        입력: "오늘 날씨가 너무 좋아서 기분이 좋아. 공원에서 산책하면서 커피도 마셨어."
+        출력: [긍정] 좋은 날씨에 공원 산책과 커피
+
+        분석할 대화:
         "{content}"
 
-        요약:
-        """
+        요약:"""
     )
     
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"content": content})
-    return result['text'].strip()
+    summary = result['text'].strip()
+    
+    # 50자 제한 적용
+    if len(summary) > 50:
+        summary = summary[:47] + "..."
+        
+    return summary
 
 def get_long_term_memory_tool(params):
     if isinstance(params, dict):
@@ -152,7 +183,8 @@ def store_short_term_memory(uid, persona_name, memory):
     # Redis에 저장
     redis_key = f"{uid}:{persona_name}:short_term_memory"
     redis_client.lpush(redis_key, memory_with_time)
-    redis_client.ltrim(redis_key, 0, 9)  # 단기 기억 10개만 유지
+    redis_client.ltrim(redis_key, 0, 9)  # 단기 기억 9개만 유지
+
 
 def get_short_term_memory(uid, persona_name):
     # Redis Key 출력
@@ -399,10 +431,10 @@ for persona in personas:
     persona_info = personas[persona]
     
     search_agent = create_react_agent(
-        llm, 
+        gpt4_model,  # GPT-4 모델 사용
         tools, 
         ChatPromptTemplate.from_template(
-            template,  # 템플릿 문자열만 전달
+            template,
         )
     )
     
@@ -481,7 +513,7 @@ async def simulate_conversation(request: PersonaChatRequest):
             importance = calculate_importance_llama(response['output'])
 
             # 중요도가 8 이상이면 벡터 db에 저장
-            if importance >= 8:
+            if importance >= 5:
                 store_long_term_memory(request.uid, persona, response['output'])
 
             # 현재 페르소나의 응답을 다음 입력으로 설정

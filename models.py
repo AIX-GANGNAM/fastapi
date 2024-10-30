@@ -66,3 +66,21 @@ class StarEventRequest(BaseModel):
     starred: bool  # 별표 상태
     time: str  # ISO 8601 형식의 시간
     userPhone: str  # 사용자 전화번호 추가
+
+
+class GeneratePersonalityRequest(BaseModel):
+    uid: str
+    name: str
+    personality: str
+    speechStyle: str
+
+class UserProfile(BaseModel):
+    uid: str
+    mbti: str
+    personality: List[str]
+    interests: List[str]
+    communication_style: str
+    speaking_style: str
+    emoji_style: str
+    values: List[str]
+    decision_style: str
