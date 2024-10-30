@@ -333,7 +333,7 @@ async def create_feed_post(post):
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "이 이미지를 자세히 설���해주세요."},
+                    {"type": "text", "text": "이 이미지를 자세히 설명해주세요."},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
                 ]
             }],

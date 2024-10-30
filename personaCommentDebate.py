@@ -15,6 +15,12 @@ from personas import personas
 from service.personaLoopChat import model
 from database import db
 from firebase_admin import firestore
+from service.personaChatVer3 import (
+    calculate_importance_llama, 
+    summarize_content,
+    store_short_term_memory,
+    store_long_term_memory
+)
 
 class DebateMessage:
     def __init__(self, speaker: str, text: str):
@@ -91,23 +97,21 @@ class CommentDebateRound:
         self.request = request
         self.debate_history = []
         self.debate_ref = None
+        self.topic = f"피드 '{self.request.caption[:20]}...'에 대한 댓글 토론"
         self.initialize_debate()
         
     def initialize_debate(self):
         debate_ref = db.collection('personachat').document(self.request.uid)\
             .collection('debates').document()
         
-        topic = f"피드 '{self.request.caption[:20]}...'에 대한 댓글 토론"
-        
         debate_ref.set({
-            'title': topic,
-            'feed_id': self.request.feed_id,
+            'title': self.topic,
+            'feedId': self.request.feed_id,
             'createdAt': firestore.SERVER_TIMESTAMP,
             'status': 'in_progress',
             'finalSender': None,
             'finalMessage': None,
-            'selectionReason': None,
-            'selected_personas': []
+            'selectionReason': None
         })
         self.debate_ref = debate_ref
 
@@ -118,6 +122,7 @@ class CommentDebateRound:
         current_time = firestore.SERVER_TIMESTAMP
         speaker_name = "진행자" if speaker == "Moderator" else personas[speaker]['realName']
         
+        # Firestore에 메시지 저장
         self.debate_ref.collection('messages').add({
             'speaker': speaker,
             'speakerName': speaker_name,
@@ -131,6 +136,36 @@ class CommentDebateRound:
         message = DebateMessage(speaker, text)
         self.debate_history.append(message)
         
+        # 페르소나의 발언인 경우에만 메모리 저장
+        if speaker != "Moderator":
+            # 단기 기억에 저장
+            store_short_term_memory(
+                self.request.uid,
+                speaker,
+                f"{speaker}: {text}"
+            )
+            
+            # 중요도 계산 및 장기 기억 저장
+            try:
+                # 중요도 평가
+                importance = calculate_importance_llama(text)
+                
+                # 중요도가 8 이상이면 요약 후 장기 기억에 저장
+                if importance >= 5:
+                    summary = summarize_content(text)
+                    store_long_term_memory(
+                        self.request.uid,
+                        speaker,
+                        summary
+                    )
+                    
+                    print(f"\n📝 중요 메시지 감지 (중요도: {importance})")
+                    print(f"요약: {summary}")
+                    
+            except Exception as e:
+                print(f"메모리 저장 중 오류 발생: {str(e)}")
+        
+        # 콘솔 출력
         print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({speaker_name})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"{text}")
@@ -140,9 +175,9 @@ class CommentDebateRound:
     def update_debate_result(self, selected_personas: List[str], selection_reasons: dict):
         self.debate_ref.update({
             'status': 'completed',
-            'selected_personas': selected_personas,
-            'selection_reasons': selection_reasons,
-            'completedAt': firestore.SERVER_TIMESTAMP
+            'completedAt': firestore.SERVER_TIMESTAMP,
+            'selectedPersonas': selected_personas,
+            'selectionReason': selection_reasons
         })
 
 async def create_persona_feed_response(name: str, request: FeedCommentRequest) -> str:
@@ -221,7 +256,7 @@ async def save_debate_result(debate_ref, final_data: dict, comments: list):
         raise
 
 # 토론 진행자 프롬프트 수정
-moderator_template = """당신은 Instagram 피드 댓글을 평가하는 토론 진행자입니다.
+moderator_template = """당신은 Instagram 피드 댓글을 평가하는 론 진행자니다.
 
 현재 게시물:
 - 이미지: {image_description}
@@ -363,6 +398,34 @@ async def save_comment_to_db(persona: str, comment: str, feed_ref: str, user_id:
         print(f"댓글 저장 중 오류 발생: {str(e)}")
         raise
 
+async def generate_acceptance_speech(persona_name: str, request: FeedCommentRequest) -> str:
+    """선정된 페르소나의 수락 발언 생성"""
+    persona_info = personas[persona_name]
+    
+    prompt = f"""당신은 {persona_name}({persona_info['realName']})입니다.
+
+성격: {persona_info['description']}
+말투: {persona_info['tone']}
+
+방금 '{request.caption[:20]}...' 피드의 댓글 작성자로 선정되었습니다.
+다른 페르소나들에 대한 감사와 앞으로의 다짐을 당신의 성격과 말투로 표현해주세요.
+
+요구사항:
+- 감사의 마음을 표현
+- 다른 페르소나들의 의견을 인정
+- 댓글 작성에 대한 다짐
+- 당신의 성격과 말투를 유지
+- 100자 이내로 작성
+"""
+    
+    response = await model.ainvoke(prompt)
+    speech = response.content
+    
+    if len(speech) > 100:
+        speech = speech[:97] + "..."
+        
+    return speech
+
 feed_debate_template = """당신은 5명의 페르소나가 토론하는 것을 진행하고 관리하는 토론 진행자입니다.
 
 현재 상황:
@@ -487,21 +550,39 @@ async def run_comment_debate(request: FeedCommentRequest):
             
             print("\n🏆 선정된 페르소나 및 댓글:")
             
+            # 토론 결과 발표 메시지
+            result_announcement = (
+                "모든 페르소나의 의견을 경청하고 평가한 결과를 발표하겠습니다.\n\n"
+                "【평가 결과】\n"
+            )
+            
+            for persona, score in final_data['scores'].items():
+                result_announcement += f"- {persona}({personas[persona]['realName']}): {score:.2f}점\n"
+            
+            result_announcement += f"\n【선정된 페르소나】\n"
+            for persona in final_data['selected_personas']:
+                direction = final_data['comment_directions'].get(persona, "")
+                result_announcement += f"▶ {persona}({personas[persona]['realName']})\n"
+                result_announcement += f"- 선정 이유: {direction}\n"
+            
+            debate.add_to_history("Moderator", result_announcement, "result")
+            
             saved_comments = []
-            # 선정된 페르소나들의 댓글 생성 및 저장
+            # 선정된 페르소나들의 수락 발언 및 댓글 생성
             for persona in final_data['selected_personas']:
                 print(f"\n● {persona}({personas[persona]['realName']})")
                 print(f"- 점수: {final_data['scores'][persona]:.2f}")
+                
+                # 수락 발언 생성 및 저장
+                acceptance_speech = await generate_acceptance_speech(persona, request)
+                debate.add_to_history(persona, acceptance_speech, "acceptance")
+                
                 direction = final_data['comment_directions'].get(persona, "게시물의 분위기에 맞는 공감 댓글을 작성해주세요.")
                 print(f"- 댓글 작성 방향: {direction}")
                 
                 try:
                     # 댓글 생성
-                    comment = await generate_comment(
-                        persona,
-                        request,
-                        direction
-                    )
+                    comment = await generate_comment(persona, request, direction)
                     print(f"- 생성된 댓글: {comment}")
                     
                     # Firestore에 댓글 저장
@@ -520,7 +601,15 @@ async def run_comment_debate(request: FeedCommentRequest):
                     })
                     
                 except Exception as e:
-                    print(f"댓글 생성 또는 저장 중 오류 발생: {str(e)}")
+                    print(f"댓글 생��� 또는 저장 ��� 오류 발생: {str(e)}")
+            
+            # 토론 마무리 메시지
+            closing_message = (
+                "토론이 마무리되었습니다. "
+                f"총 {len(final_data['selected_personas'])}명의 페르소나가 선정되어 "
+                "댓글을 작성하게 되었습니다. 모든 페르소나의 의견에 감사드립니다."
+            )
+            debate.add_to_history("Moderator", closing_message, "closing")
             
             return {
                 "status": "success",

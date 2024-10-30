@@ -24,4 +24,5 @@ aiclient = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 def get_persona_collection(uid, persona_name):
     return client.get_or_create_collection(f"{uid}_inside_out_persona_{persona_name}")
 
+
 redis_client = redis.Redis(host='localhost', port=6379, db=0)
