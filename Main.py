@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile, CommentInteraction
 from service.services import send_expo_push_notification
+import logging
 import requests
 from service.services import (
     chat_with_persona,
@@ -44,9 +45,14 @@ from service.personaSms import star_event
 import uvicorn
 from pytz import timezone
 from personaDebate import run_persona_debate
+
 from service.personaGenerate import generate_personality
 from service.profileUpdate import update_clone_personality
 from service.interactionStore import store_user_interaction
+
+
+from fastapi.middleware.cors import CORSMiddleware
+
 
 
 # 스케줄러 초기화
@@ -58,6 +64,7 @@ scheduler = AsyncIOScheduler(
         'misfire_grace_time': 300  # 5분까지 허용
     }
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -78,6 +85,14 @@ async def lifespan(app: FastAPI):
 # FastAPI 앱 초기화
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 실제 배포시에는 특정 도메인만 허용하도록 수정
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 스케줄러 상태 확인 엔드포인트
 @app.get("/scheduler-status")
 async def get_scheduler_status():
@@ -94,6 +109,18 @@ async def get_scheduler_status():
             ]
         }
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/networkcheck")
+async def network_check():
+    try:
+        return {
+            "status": "success",
+            "message": "서버가 정상적으로 응답합니다",
+            "timestamp": str(datetime.now())
+        }
+    except Exception as e:
+        logging.error(f"네트워크 체크 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 라우트 정의
