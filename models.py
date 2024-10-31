@@ -92,3 +92,10 @@ class CommentInteraction(BaseModel):
     uid: str
     content: str
     interaction_type: str
+
+
+class ChatRequest(BaseModel):
+    senderId: str          # 메시지 보낸 사용자 ID
+    recipientId: str       # 수신자 ID
+    chatId: str           # 채팅방 ID
+    message: str          # 보낸 메시지

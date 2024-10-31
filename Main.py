@@ -49,7 +49,7 @@ from personaDebate import run_persona_debate
 from service.personaGenerate import generate_personality
 from service.profileUpdate import update_clone_personality
 from service.interactionStore import store_user_interaction
-
+from service.aiChatService import handle_offline_chat_service
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -308,6 +308,11 @@ async def store_comment_interaction(comment_data: CommentInteraction):
         message=comment_data.content,
         interaction_type=comment_data.interaction_type
     )
+
+
+@app.post("/clone-chat")
+async def clone_chat_endpoint(chat_request: ChatRequest):
+    return await handle_offline_chat_service(chat_request)
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):

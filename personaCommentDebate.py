@@ -138,7 +138,7 @@ class CommentDebateRound:
         
         # 페르소나의 발언인 경우에만 메모리 저장
         if speaker != "Moderator":
-            # 단기 기억에 저장
+            # 단기 기억에 장
             store_short_term_memory(
                 self.request.uid,
                 speaker,
@@ -150,7 +150,7 @@ class CommentDebateRound:
                 # 중요도 평가
                 importance = calculate_importance_llama(text)
                 
-                # 중요도가 8 이상이면 요약 후 장기 기억에 저장
+                # 중요도가 5 이상이면 요약 후 장기 기억에 저장
                 if importance >= 5:
                     summary = summarize_content(text)
                     store_long_term_memory(
@@ -164,7 +164,7 @@ class CommentDebateRound:
                     
             except Exception as e:
                 print(f"메모리 저장 중 오류 발생: {str(e)}")
-        
+    
         # 콘솔 출력
         print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({speaker_name})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -180,11 +180,37 @@ class CommentDebateRound:
             'selectionReason': selection_reasons
         })
 
+async def get_user_personas(uid: str) -> dict:
+    """Firestore에서 사용자의 페르소나 정보 가져오기"""
+    try:
+        user_doc = db.collection('users').document(uid).get()
+        if user_doc.exists:
+            personas = user_doc.to_dict().get('persona', [])
+            # 페르소나 정보를 Name을 키로 하는 딕셔너리로 변환
+            return {
+                p['Name']: {
+                    'DPNAME': p['DPNAME'],
+                    'IMG': p.get('IMG', ''),
+                    'description': p['description'],
+                    'tone': p['tone'],
+                    'example': p['example'],
+                    'realName': p['DPNAME']  # realName을 DPNAME으로 사용
+                }
+                for p in personas
+            }
+        return {}
+    except Exception as e:
+        print(f"페르소나 정보 조회 중 오류 발생: {str(e)}")
+        return {}
+
 async def create_persona_feed_response(name: str, request: FeedCommentRequest) -> str:
     """각 페르소나의 의견 생성"""
-    persona_info = personas[name]
+    personas = await get_user_personas(request.uid)
+    persona_info = personas.get(name)
+    if not persona_info:
+        raise ValueError(f"페르소나 {name}을(를) 찾을 수 없습니다.")
     
-    prompt = f"""당신은 {name}({persona_info['realName']})입니다.
+    prompt = f"""당신은 {persona_info['DPNAME']}입니다.
 
 성격: {persona_info['description']}
 말투: {persona_info['tone']}
@@ -215,10 +241,10 @@ async def create_persona_feed_response(name: str, request: FeedCommentRequest) -
     return content
 
 async def generate_comment(persona_name: str, request: FeedCommentRequest, direction: str) -> str:
-    """댓글 생성 함수"""
-    persona_info = personas[persona_name]
+    personas = await get_user_personas(request.uid)
+    persona_info = personas.get(persona_name)
     
-    prompt = f"""당신은 {persona_name}({persona_info['realName']})입니다.
+    prompt = f"""당신은 {persona_info['DPNAME']}입니다.
 
 성격: {persona_info['description']}
 말투: {persona_info['tone']}
@@ -256,7 +282,7 @@ async def save_debate_result(debate_ref, final_data: dict, comments: list):
         raise
 
 # 토론 진행자 프롬프트 수정
-moderator_template = """당신은 Instagram 피드 댓글을 평가하는 론 진행자니다.
+moderator_template = """당신은 Instagram 피드 댓글을 평가하는 토론 진행자입니다.
 
 현재 게시물:
 - 이미지: {image_description}
@@ -265,10 +291,14 @@ moderator_template = """당신은 Instagram 피드 댓글을 평가하는 론 �
 토론 기록:
 {debate_history}
 
+사용 가능한 페르소나:
+{available_personas}
+
 각 페르소나의 의견을 평가하여 다음을 수행하세요:
-1. 각 페르소나에게 0.0~1.0 사이의 점수 부여
-2. 0.7점 이상인 페르소나 중 최대 3명 선정
-3. 선정된 페르소나별로 댓글 작성 방향 제시
+1. 제시된 페르소나 중에서만 선택
+2. 각 페르소나에게 0.0~1.0 사이의 점수 부여
+3. 0.7점 이상인 페르소나 중 최대 2명 선정
+4. 선정된 페르소나별로 댓글 작성 방향 제시
 
 평가 기준:
 - 게시물 성격과의 적합성 (40%)
@@ -369,6 +399,9 @@ async def parse_comment_debate_result(output: str) -> dict:
         }
 
 async def save_comment_to_db(persona: str, comment: str, feed_ref: str, user_id: str) -> dict:
+    personas = await get_user_personas(user_id)
+    persona_info = personas.get(persona)
+    
     try:
         current_time = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         comment_id = str(int(datetime.now().timestamp() * 1000))
@@ -378,8 +411,8 @@ async def save_comment_to_db(persona: str, comment: str, feed_ref: str, user_id:
             'createdAt': current_time,
             'id': comment_id,
             'likes': [],
-            'nick': personas[persona]['realName'],
-            'profileImg': personas[persona].get('profileImg', ''),
+            'nick': persona_info['DPNAME'],
+            'profileImg': persona_info.get('IMG', ''),
             'replies': [],
             'userId': f"{user_id}_{persona}"
         }
@@ -400,9 +433,10 @@ async def save_comment_to_db(persona: str, comment: str, feed_ref: str, user_id:
 
 async def generate_acceptance_speech(persona_name: str, request: FeedCommentRequest) -> str:
     """선정된 페르소나의 수락 발언 생성"""
-    persona_info = personas[persona_name]
+    personas = await get_user_personas(request.uid)
+    persona_info = personas.get(persona_name)
     
-    prompt = f"""당신은 {persona_name}({persona_info['realName']})입니다.
+    prompt = f"""당신은 {persona_info['DPNAME']}입니다.
 
 성격: {persona_info['description']}
 말투: {persona_info['tone']}
@@ -480,42 +514,32 @@ Final Answer: 반드시 아래 양식으로 최종 결정을 작성하세요:
 {agent_scratchpad}"""
 
 async def run_comment_debate(request: FeedCommentRequest):
-    """메인 토론 실행 함수"""
-    print(f"\n🤖 피드 댓글 토론 시스템 시작")
-    print(f"📝 게시물 정보:")
-    print(f"이미지: {request.image_description}")
-    print(f"내용: {request.caption}")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    
-    # Firestore에서 해당 feed 문서 찾기
-    feeds_ref = db.collection('feeds')
-    query = feeds_ref.where('id', '==', request.feed_id).limit(1)
-    docs = query.get()
-    
-    if not docs:
-        raise Exception(f"Feed not found with id: {request.feed_id}")
-    
-    feed_ref = docs[0].reference
-    
-    debate = CommentDebateRound(request)
-    
-    # 게시물 분석
-    content_analysis = (
-        f"[게시물 분석]\n"
-        f"이미지: {request.image_description}\n"
-        f"내용: {request.caption}\n\n"
-        f"각 페르소나는 자신이 이 게시물에 댓글을 달면 좋은 이유를 설명해주세요."
-    )
-    
-    debate.add_to_history("Moderator", content_analysis, "analysis")
-    
-    # 페르소나 의견 수집
-    for name in personas.keys():
-        response = await create_persona_feed_response(name, request)
-        debate.add_to_history(name, response, "opinion")
-        await asyncio.sleep(1)
-
+    """댓글 토론 실행"""
     try:
+        print("\n📝 피드 댓글 토론 시스템 시작")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"이미지: {request.image_description}")
+        print(f"내용: {request.caption}")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        # 사용자의 페르소나 정보 가져오기
+        personas = await get_user_personas(request.uid)
+        if not personas:
+            raise ValueError("사용자의 페르소나 정보를 찾을 수 없습니다.")
+
+        # 토론 초기화
+        debate = CommentDebateRound(request)
+        
+        # 각 페르소나의 의견 수집
+        for persona_name, persona_info in personas.items():
+            try:
+                opinion = await create_persona_feed_response(persona_name, request)
+                debate.add_to_history(persona_name, opinion, "opinion")
+                await asyncio.sleep(1)
+            except Exception as e:
+                print(f"{persona_info['DPNAME']}의 의견 생성 중 오류 발생: {str(e)}")
+                continue
+
         # 토론 진행자 실행
         executor = AgentExecutor(
             agent=create_react_agent(
@@ -534,9 +558,10 @@ async def run_comment_debate(request: FeedCommentRequest):
             "debate_history": "\n".join([
                 f"{msg.speaker}: {msg.text}"
                 for msg in debate.debate_history
-            ])
+            ]),
+            "available_personas": list(personas.keys())  # 사용 가능한 페르소나 목록 전달
         })
-        
+
         # 결과 파싱 및 에러 처리
         try:
             final_data = await parse_comment_debate_result(result['output'])
@@ -601,7 +626,7 @@ async def run_comment_debate(request: FeedCommentRequest):
                     })
                     
                 except Exception as e:
-                    print(f"댓글 생��� 또는 저장 ��� 오류 발생: {str(e)}")
+                    print(f"댓글 생성 또는 저장 오류 발생: {str(e)}")
             
             # 토론 마무리 메시지
             closing_message = (
