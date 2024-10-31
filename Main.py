@@ -6,7 +6,6 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile, CommentInteraction
-from service.services import send_expo_push_notification
 import logging
 import requests
 from models import NotificationRequest
