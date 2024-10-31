@@ -181,36 +181,51 @@ class CommentDebateRound:
         })
 
 async def get_user_personas(uid: str) -> dict:
-    """Firestore에서 사용자의 페르소나 정보 가져오기"""
+    """사용자의 페르소나 정보 가져오기"""
     try:
+        print(f"\n🔍 사용자({uid})의 페르소나 정보 조회 중...")
         user_doc = db.collection('users').document(uid).get()
-        if user_doc.exists:
-            personas = user_doc.to_dict().get('persona', [])
-            # 페르소나 정보를 Name을 키로 하는 딕셔너리로 변환
-            return {
-                p['Name']: {
-                    'DPNAME': p['DPNAME'],
-                    'IMG': p.get('IMG', ''),
-                    'description': p['description'],
-                    'tone': p['tone'],
-                    'example': p['example'],
-                    'realName': p['DPNAME']  # realName을 DPNAME으로 사용
+        
+        if not user_doc.exists:
+            print(f"⚠️ 사용자 문서를 찾을 수 없습니다: {uid}")
+            return {}
+            
+        user_data = user_doc.to_dict()
+        personas_array = user_data.get('persona', [])
+        
+        # 페르소나 정보를 Name을 키로 하는 딕셔너리로 변환
+        personas = {}
+        for p in personas_array:
+            if isinstance(p, dict) and 'Name' in p:
+                personas[p['Name']] = {
+                    'DPNAME': p.get('DPNAME', p['Name']),  # realName 대신 DPNAME 사용
+                    'description': p.get('description', ''),
+                    'tone': p.get('tone', ''),
+                    'example': p.get('example', ''),
+                    'IMG': p.get('IMG', '')
                 }
-                for p in personas
-            }
-        return {}
+        
+        if not personas:
+            print("⚠️ 페르소나 정보가 없습니다")
+            return {}
+            
+        print(f"✅ 조회된 페르소나: {', '.join(personas.keys())}")
+        return personas
+        
     except Exception as e:
-        print(f"페르소나 정보 조회 중 오류 발생: {str(e)}")
+        print(f"❌ 페르소나 정보 조회 중 오류: {str(e)}")
         return {}
 
 async def create_persona_feed_response(name: str, request: FeedCommentRequest) -> str:
     """각 페르소나의 의견 생성"""
-    personas = await get_user_personas(request.uid)
-    persona_info = personas.get(name)
-    if not persona_info:
-        raise ValueError(f"페르소나 {name}을(를) 찾을 수 없습니다.")
-    
-    prompt = f"""당신은 {persona_info['DPNAME']}입니다.
+    try:
+        personas = await get_user_personas(request.uid)
+        if not personas or name not in personas:
+            raise ValueError(f"페르소나 {name}을(를) 찾을 수 없습니다.")
+        
+        persona_info = personas[name]
+        
+        prompt = f"""당신은 {persona_info['realName']}입니다.
 
 성격: {persona_info['description']}
 말투: {persona_info['tone']}
@@ -231,14 +246,18 @@ async def create_persona_feed_response(name: str, request: FeedCommentRequest) -
 - 당신의 성격과 말투를 반영해주세요
 - 다른 페르소나와의 차별점을 언급해주세요
 """
-    
-    response = await model.ainvoke(prompt)
-    content = response.content
-    
-    if len(content) > 200:
-        content = content[:197] + "..."
-    
-    return content
+
+        response = await model.ainvoke(prompt)
+        speech = response.content
+        
+        if len(speech) > 200:
+            speech = speech[:197] + "..."
+            
+        return speech
+        
+    except Exception as e:
+        print(f"❌ {name}의 의견 생성 중 오류: {str(e)}")
+        raise
 
 async def generate_comment(persona_name: str, request: FeedCommentRequest, direction: str) -> str:
     personas = await get_user_personas(request.uid)
@@ -602,7 +621,7 @@ async def run_comment_debate(request: FeedCommentRequest):
                 acceptance_speech = await generate_acceptance_speech(persona, request)
                 debate.add_to_history(persona, acceptance_speech, "acceptance")
                 
-                direction = final_data['comment_directions'].get(persona, "게시물의 분위기에 맞는 공감 댓글을 작성해주세요.")
+                direction = final_data['comment_directions'].get(persona, "게시물의 분위기에 맞는 공 댓글을 작성해주세요.")
                 print(f"- 댓글 작성 방향: {direction}")
                 
                 try:

@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 from models import GeneratePersonalityRequest
 from database import db  # database.py에서 Firestore 클라이언트 import
@@ -36,8 +35,8 @@ persona_prompt = PromptTemplate(
     template=persona_template
 )
 
-# LLM 체인 생성
-persona_chain = LLMChain(llm=gpt4_model, prompt=persona_prompt)
+# 새로운 방식으로 체인 생성
+persona_chain = persona_prompt | gpt4_model
 
 async def generate_personality(request: GeneratePersonalityRequest):
     print(f"\n사용자 정의 페르소나 생성 요청:")

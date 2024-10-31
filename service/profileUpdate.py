@@ -1,7 +1,6 @@
 from models import UserProfile
 from database import db
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 
 # GPT-4 모델 초기화
@@ -39,8 +38,8 @@ profile_prompt = PromptTemplate(
     template=profile_persona_template
 )
 
-# LLM 체인 생성
-profile_chain = LLMChain(llm=gpt4_model, prompt=profile_prompt)
+# 새로운 방식으로 체인 생성
+profile_chain = profile_prompt | gpt4_model
 
 async def update_clone_personality(profile: UserProfile):
     try:
