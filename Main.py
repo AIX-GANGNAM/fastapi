@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile, CommentInteraction
 from service.services import send_expo_push_notification
 import logging
 import requests
+from models import NotificationRequest
+from service.sendNofiticaion import send_expo_push_notification
 from service.services import (
     chat_with_persona,
     get_personas,
@@ -33,7 +36,7 @@ from firebase_admin import auth
 from firebase_admin import firestore
 from database import db
 # from villageServices import get_all_agents
-from fastapi import WebSocket
+from fastapi import WebSocket, Request   
 # from villageServices import (
 #     get_all_agents,
 #     AgentManager  # 에이전트 관리를 위한 클래스
@@ -92,6 +95,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 디바이스 - EndPoint 네트워크 통신 
+@app.get("/v2/networkcheck")
+async def network_check(request: Request):
+    print("@app.get > network_check 호출")
+    try:
+        return {
+            "status": "success",
+            "message": "서버가 정상적으로 응답합니다",
+            "timestamp": str(datetime.now())
+        }
+    except Exception as e:
+        logging.error(f"네트워크 체크 에러: {str(e)} | 요청: {request.url}")
+        raise HTTPException(status_code=500, detail=f"서버 오류: {str(e)}")
 
 # 스케줄러 상태 확인 엔드포인트
 @app.get("/scheduler-status")
@@ -111,17 +127,6 @@ async def get_scheduler_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/networkcheck")
-async def network_check():
-    try:
-        return {
-            "status": "success",
-            "message": "서버가 정상적으로 응답합니다",
-            "timestamp": str(datetime.now())
-        }
-    except Exception as e:
-        logging.error(f"네트워크 체크 에러: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
@@ -134,7 +139,6 @@ async def chat_endpoint(chat_request: ChatRequest):
     persona_name = response['persona_name']
     response_text = response['response']
     
-    send_expo_push_notification(uid, persona_name, response_text)
     
     # ChatResponse 모델에 맞게 반환
     return ChatResponse(persona_name=persona_name, response=response_text)
@@ -142,7 +146,12 @@ async def chat_endpoint(chat_request: ChatRequest):
 
 @app.post("/v2/chat")
 async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
-    return await persona_chat_v2(chat_request)
+    print("@app.post > persona_chat_v2_endpoint 호출")  
+    try:
+        return await persona_chat_v2(chat_request)
+    except Exception as e:
+        logging.error(f"채팅 처리 에러: {str(e)} | 요청 데이터: {chat_request}")
+        raise HTTPException(status_code=500, detail=f"채팅 처리 오류: {str(e)}")
 
 
 @app.get("/personas")
@@ -310,9 +319,15 @@ async def store_comment_interaction(comment_data: CommentInteraction):
     )
 
 
+
 @app.post("/clone-chat")
 async def clone_chat_endpoint(chat_request: ChatRequest):
     return await handle_offline_chat_service(chat_request)
+
+@app.post("/notification")
+async def notification_endpoint(request: NotificationRequest):
+    return await send_expo_push_notification(request)
+
 
 # @app.websocket("/ws")
 # async def websocket_endpoint(websocket : WebSocket):

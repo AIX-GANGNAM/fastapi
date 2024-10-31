@@ -71,6 +71,13 @@ class StarEventRequest(BaseModel):
     userPhone: str  # 사용자 전화번호 추가
 
 
+class NotificationRequest(BaseModel):
+    uid: str
+    whoSendMessage: str
+    message: str
+    pushType: str
+
+
 class GeneratePersonalityRequest(BaseModel):
     uid: str
     name: str
@@ -93,9 +100,9 @@ class CommentInteraction(BaseModel):
     content: str
     interaction_type: str
 
-
 class ChatRequest(BaseModel):
     senderId: str          # 메시지 보낸 사용자 ID
     recipientId: str       # 수신자 ID
     chatId: str           # 채팅방 ID
     message: str          # 보낸 메시지
+
