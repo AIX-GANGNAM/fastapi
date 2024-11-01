@@ -10,7 +10,7 @@ import asyncio
 from typing import List, Dict
 import pytz
 from personas import personas
-from service.personaChatVer3 import get_long_term_memory_tool, get_user_profile, get_user_events
+from service.personaChatVer3 import get_long_term_memory_tool, get_user_profile, get_user_events, calculate_importance_llama, summarize_content, store_short_term_memory, store_long_term_memory
 from database import db
 from firebase_admin import firestore
 from service.smsservice import send_sms_service  # 상단에 import 추가
@@ -51,27 +51,45 @@ class DebateRound:
         })
         self.debate_ref = debate_ref
         
-    def add_to_history(self, speaker: str, text: str, message_type: str = "opinion"):
-        if len(text) > 200:
-            text = text[:197] + "..."
-            
-        current_time = firestore.SERVER_TIMESTAMP
-        speaker_name = "진행자" if speaker == "Moderator" else personas[speaker]['realName']
-        
-        self.debate_ref.collection('messages').add({
-            'speaker': speaker,
-            'speakerName': speaker_name,
-            'text': text,
-            'messageType': message_type,
-            'timestamp': current_time,
-            'isRead': True,
-            'charCount': len(text)
-        })
-        
+    def add_to_history(self, speaker: str, text: str, message_type: str = "message"):
+        """토론 히스토리에 메시지 추가 및 메모리 저장"""
         message = DebateMessage(speaker, text)
         self.debate_history.append(message)
         
-        print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({speaker_name})")
+        # Firestore에 메시지 저장
+        if self.debate_ref:
+            self.debate_ref.collection('messages').add({
+                'speaker': speaker,
+                'text': text,
+                'type': message_type,
+                'timestamp': message.timestamp,
+                'isRead': message.isRead
+            })
+        
+        # 페르소나의 발언인 경우에만 메모리 저장
+        if speaker != "Moderator":
+            # 단기 기억에 저장
+            store_short_term_memory(
+                self.request.uid, 
+                speaker, 
+                f"{speaker}: {text}"
+            )
+            
+            # 중요도 계산
+            importance = calculate_importance_llama(text)
+            
+            # 중요도가 8 이상이면 장기 기억에 저장
+            if importance >= 5:
+                # 요약 생성
+                summary = summarize_content(text)
+                # 장기 기억에 저장
+                store_long_term_memory(
+                    self.request.uid,
+                    speaker,
+                    summary
+                )
+        
+        print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({personas[speaker]['realName']})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"{text}")
         print(f"글자 수: {len(text)}자")
@@ -83,7 +101,7 @@ def print_sms(message_data: str) -> str:
     sender = data.get('sender', '')
     
     if len(message) > 30:
-        print("\n⚠️ 경고: 메시지가 30자를 초과하여 자동으로 수정됩니다.")
+        print("\n⚠️ 경고: 메시지가 30자를 경과하여 자동으로 수정됩니다.")
         message = message[:27] + "..."
     
     print(f"\n📱 최종 선정된 알림 메시지")
@@ -101,14 +119,18 @@ def print_sms(message_data: str) -> str:
     })
 
 async def generate_acceptance_speech(persona_name: str, event_request: StarEventRequest) -> str:
-    persona_info = personas[persona_name]
+    # DB에서 페르소나 정보 가져오기
+    persona_info = await get_user_persona(event_request.uid, persona_name)
     
-    prompt = f"""당신은 {persona_name}({persona_info['realName']})입니다.
+    if not persona_info:
+        raise ValueError(f"Persona {persona_name} not found in user's personas")
+    
+    prompt = f"""당신은 {persona_name}({persona_info['DPNAME']})입니다.
 
 성격: {persona_info['description']}
 말투: {persona_info['tone']}
 
-방금 '{event_request.eventId}' 일정의 알림 메시지를 보내는 역할로 선정되었습니다.
+방금 '{event_request.eventId}' 일정의 알림 메시지를 보내는 역할로 배정되었습니다.
 다른 페르소나들에 대한 감사와 앞으로의 다짐을 당신의 성격과 말투로 표현해주세요.
 
 요구사항:
@@ -168,8 +190,82 @@ tools = [
         description="사용자의 일정을 조회합니다. Input: {'uid': string, 'date': string}"
     )
 ]
+
+async def get_user_personas(uid: str) -> dict:
+    """사용자의 페르소나 정보를 DB에서 가져오기"""
+    try:
+        user_doc = db.collection('users').document(uid).get()
+        
+        if not user_doc.exists:
+            raise ValueError(f"User document not found for UID: {uid}")
+            
+        user_data = user_doc.to_dict()
+        personas = user_data.get('persona', [])
+        
+        # 페르소나 정보를 딕셔너리로 변환
+        persona_dict = {}
+        for persona in personas:
+            if isinstance(persona, dict) and 'Name' in persona:
+                persona_dict[persona['Name']] = {
+                    'realName': persona.get('DPNAME', persona['Name']),
+                    'description': persona.get('description', ''),
+                    'tone': persona.get('tone', ''),
+                    'example': persona.get('example', '')
+                }
+        
+        return persona_dict
+
+    except Exception as e:
+        print(f"Error getting user personas: {str(e)}")
+        raise
+
+async def get_user_persona(uid: str, persona_name: str):
+    """사용자의 특정 페르소나 정보 가져오기"""
+    try:
+        print(f"Searching {persona_name} persona for UID: {uid}")
+        user_doc = db.collection('users').document(uid).get()
+        
+        if not user_doc.exists:
+            print(f"User document not found for UID: {uid}")
+            return None
+            
+        user_data = user_doc.to_dict()
+        personas = user_data.get('persona', [])
+        
+        print(f"Found personas: {personas}")  # 디버깅용
+        
+        # persona 배열에서 특정 페르소나 찾기
+        persona_data = None
+        if isinstance(personas, list):
+            for persona in personas:
+                if isinstance(persona, dict) and persona.get('Name') == persona_name:
+                    persona_data = persona
+                    break
+        
+        if persona_data:
+            return {
+                'DPNAME': persona_data.get('DPNAME', persona_name),
+                'IMG': persona_data.get('IMG', ''),
+                'Name': persona_name,
+                'description': persona_data.get('description', ''),
+                'example': persona_data.get('example', ''),
+                'tone': persona_data.get('tone', '')
+            }
+                
+        print(f"{persona_name} persona not found in array")
+        return None
+
+    except Exception as e:
+        print(f"Error in get_user_persona: {str(e)}")
+        print(f"User doc data: {user_doc.to_dict() if user_doc.exists else 'No doc'}")
+        raise Exception(f"{persona_name} 페르소나 조회 실패: {str(e)}")
+
 async def create_persona_response(name: str, event_request: StarEventRequest) -> str:
-    persona_info = personas[name]
+    # DB에서 페르소나 정보 가져오기
+    persona_info = await get_user_persona(event_request.uid, name)
+    
+    if not persona_info:
+        raise ValueError(f"Persona {name} not found in user's personas")
     
     # 시간 처리 수정
     try:
@@ -253,6 +349,9 @@ def send_final_message(request: StarEventRequest, result: Dict):
         return False
 
 async def run_persona_debate(event_request: StarEventRequest):
+    # DB에서 페르소나 정보 가져오기
+    personas = await get_user_personas(event_request.uid)
+    
     # 시간대 처리 추가
     event_time = datetime.fromisoformat(event_request.time.replace('Z', '+00:00'))
     if event_time.tzinfo is None:
@@ -275,7 +374,7 @@ async def run_persona_debate(event_request: StarEventRequest):
         f"[이벤트 분석]\n"
         f"일정: {event_request.eventId}\n"
         f"시간: {formatted_time}\n\n"
-        f"이벤트 특성 고려사항:\n"
+        f"이트 특성 고려사항:\n"
         f"1. 이벤트의 성격과 중요도\n"
         f"2. 시간 관리의 중요성\n"
         f"3. 필요한 준비사항\n"
@@ -340,7 +439,7 @@ async def run_persona_debate(event_request: StarEventRequest):
             acceptance_speech = await generate_acceptance_speech(final_data['sender'], event_request)
             debate.add_to_history(final_data['sender'], acceptance_speech, "acceptance")
 
-            # 최종 결과 발표
+            # 최종 과 발표
             final_announcement = (
                 f"[토론 결과 발표]\n\n"
                 f"✨ 선정된 페르소나: {final_data['sender']}({personas[final_data['sender']]['realName']})\n"

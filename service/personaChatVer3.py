@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from pydantic import BaseModel
 from redis import Redis
-from database import get_persona_collection, redis_client
+from database import redis_client, get_user_collection, query_memories
 from personas import personas
 import re
 import json
@@ -24,28 +24,36 @@ from langchain_ollama import OllamaLLM  # 새로운 import 문
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# Local Sllm API URL 설정
-LLAMA_API_URL = "http://localhost:1234/v1/chat/completions"
-
 # Ollama 대신 OllamaLLM 사용
 llm = OllamaLLM(
-    model="llama2",
-    base_url="http://localhost:11434"
+    model="swchoi1994/exaone3-7-q8_0-gguf:latest",
+    base_url="http://192.168.0.119:11434",
+    temperature=0.5
 )
+
+# GPT-4 모델 추가
+gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
 def calculate_importance_llama(content):
     prompt = PromptTemplate(
         input_variables=["content"],
-        template="""다음 대화 내용의 중요성을 설명이나 추가 텍스트 없이 1에서 10까지 숫자로 평가해 주세요. 
-        응답은 오직 숫자만 입력해주세요. 설명이나 추가 텍스트가 포함되면 응답은 무효로 처리됩니다. 
-        반드시 1에서 10 사이의 정수만 반환해주세요.
+        template="""시스템: 당신은 대화의 중요도를 평가하는 분석 시스템입니다. 
+        오직 1에서 10 사이의 정수만 출력해야 합니다.
+        
+        평가 기준:
+        1-3: 일상적인 대화, 인사, 가벼운 잡담
+        4-6: 개인적 경험, 감정 공유, 일반적인 의견 교환
+        7-8: 중요한 정보, 깊은 통찰, 강한 감정 표현
+        9-10: 매우 중요한 결정, 핵심 정보, 강력한 감정적 순간
 
-        대화 내용:
+        분석할 대화:
         "{content}"
-        """
+
+        중요도 점수:"""
     )
     
-    chain = LLMChain(llm=llm, prompt=prompt)
+    # GPT-4 모델 사용
+    chain = LLMChain(llm=gpt4_model, prompt=prompt)
     result = chain.invoke({"content": content})
     
     try:
@@ -53,63 +61,73 @@ def calculate_importance_llama(content):
         if importance:
             return int(importance.group())
         else:
-            print(f"유효하지 않은 중요도 값. 기본값 5를 사용합니다.")
-            return 5
+            return 5  # 기본값
     except (AttributeError, ValueError):
-        print(f"중요도를 숫자로 변환할 수 없습니다: {result}. 기본값 5를 사용합니다.")
-        return 5
+        return 5  # 오류 발생시 기본값
 
 def summarize_content(content):
     prompt = PromptTemplate(
         input_variables=["content"],
-        template="""다음 대화 내용을 한두 문장으로 요약만 하세요. 
-        반드시 요약만 입력하세요. 불필요한 설명이나 추가 텍스트는 절대 입력하지 마세요. 
-        요약 외의 모든 응답은 무효로 처리됩니다. 반드시 짧고 간결하게 요약만 해주세요.
+        template="""시스템: 당신은 대화 내용을 정확하고 간단히 요약하는 전문가입니다.
 
-        대화 내용:
+        요약 규칙:
+        1. 최대 50자 이내로 요약하세요
+        2. 핵심 내용과 감정만 포함하세요
+        3. 불필요한 설명이나 부연 설명을 제외하세요
+        4. 객관적이고 명확한 문장으로 작성하세요
+        5. 다음 형식을 반드시 지키세요: [감정/태도] + 핵심 메시지
+
+        예시:
+        입력: "나는 정말 화가 나! 어제 친구가 약속을 어겼어. 세 시간이나 기다렸다고!"
+        출력: [분노] 친구의 약속 불이행으로 3시간 대기
+
+        입력: "오늘 날씨가 너무 좋아서 기분이 좋아. 공원에서 산책하면서 커피도 마셨어."
+        출력: [긍정] 좋은 날씨에 공원 산책과 커피
+
+        분석할 대화:
         "{content}"
 
-        요약:
-        """
+        요약:"""
     )
     
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"content": content})
-    return result['text'].strip()
+    summary = result['text'].strip()
+    
+    # 50자 제한 적용
+    if len(summary) > 50:
+        summary = summary[:47] + "..."
+        
+    return summary
 
 def get_long_term_memory_tool(params):
-    if isinstance(params, dict):
-        # 이미 dict라면 바로 get_long_term_memory 함수 호출
-        return get_long_term_memory(
-            params['uid'],
-            params['persona_name'],
-            params['query'],
-            params.get('limit', 3)
-        )
-    elif isinstance(params, str):
-        try:
-            # 개행 문자와 앞뒤 공백을 제거하여 JSON 문자열로 변환
-            params = params.replace("\n", "").replace("\r", "").strip()
+    """벡터 DB에서 메모리 검색 도구"""
+    try:
+        if isinstance(params, dict):
+            params_dict = params
+        else:
+            params = params.replace('\\"', '"').strip('"')
             params_dict = json.loads(params)
-            
-            # 필요한 필드가 존재하는지 확인
-            if not all(k in params_dict for k in ['uid', 'persona_name', 'query']):
-                return "Action Input에 필수 필드가 없습니다. 'uid', 'persona_name', 'query'가 포함된 JSON 형식으로 입력해주세요."
-            
-            # get_long_term_memory 함수 호출
-            return get_long_term_memory(
-                params_dict['uid'],
-                params_dict['persona_name'],
-                params_dict['query'],
-                params_dict.get('limit', 3)
-            )
-        except json.JSONDecodeError as e:
-            # JSON 디코딩 실패 시 에러 메시지 출력
-            print(f"JSON 파싱 오류: {str(e)}")  # 디버깅을 위한 로그 출력
-            return "Action Input이 올바른 JSON 형식이 아닙니다. 큰따옴표를 사용하여 JSON 형식으로 입력해주세요."
-    else:
-        # 잘못된 타입의 params가 입력된 경우
-        return "잘못된 Action Input 타입입니다. dict 또는 JSON 형식의 문자열이어야 합니다."
+        
+        uid = params_dict.get('uid')
+        persona_name = params_dict.get('persona_name')
+        query = params_dict.get('query')
+        limit = params_dict.get('limit', 3)
+        
+        # 검색 실행
+        results = query_memories(
+            uid=uid,
+            query=query,
+            memory_type="persona_chat",
+            persona_name=persona_name,
+            limit=limit
+        )
+        
+        return results['documents'][0] if results['documents'] else []
+        
+    except Exception as e:
+        print(f"Error in get_long_term_memory_tool: {str(e)}")
+        return f"메모리 검색 중 오류 발생: {str(e)}"
 
 
 
@@ -144,56 +162,129 @@ def store_short_term_memory(uid, persona_name, memory):
     summary = summarize_content(memory)
     
     # 현재 시간 추가
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = datetime.now()
+    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
     
-    # 대화 내용과 시간을 함께 저장
-    memory_with_time = f"[{current_time}] {summary}"
+    # 메모리 데이터 구조화
+    memory_data = {
+        "timestamp": timestamp,
+        "content": summary,
+        "importance": calculate_importance_llama(memory),
+        "type": "chat"  # 'chat', 'event', 'emotion' 등으로 구분 가능
+    }
     
-    # Redis에 저장
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
-    redis_client.lpush(redis_key, memory_with_time)
-    redis_client.ltrim(redis_key, 0, 9)  # 단기 기억 10개만 유지
+    # JSON으로 직렬화
+    memory_json = json.dumps(memory_data, ensure_ascii=False)
+    
+    # Redis 키 설정
+    base_key = f"{uid}:{persona_name}"
+    
+    # 시간대별 저장
+    time_keys = {
+        "recent": {
+            "key": f"{base_key}:recent",
+            "max_items": 20,
+            "ttl": 3600  # 1시간
+        },
+        "today": {
+            "key": f"{base_key}:today",
+            "max_items": 50,
+            "ttl": 86400  # 24시간
+        },
+        "weekly": {
+            "key": f"{base_key}:weekly",
+            "max_items": 100,
+            "ttl": 604800  # 1주일
+        }
+    }
+    
+    # 각 시간대별로 저장
+    for storage_type, config in time_keys.items():
+        # 중요도가 7 이상인 경우만 weekly에 저장
+        if storage_type == "weekly" and memory_data["importance"] < 7:
+            continue
+            
+        redis_client.lpush(config["key"], memory_json)
+        redis_client.ltrim(config["key"], 0, config["max_items"] - 1)
+        redis_client.expire(config["key"], config["ttl"])
 
-def get_short_term_memory(uid, persona_name):
-    # Redis Key 출력
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
+def get_short_term_memory(uid, persona_name, memory_type="recent"):
+    base_key = f"{uid}:{persona_name}:{memory_type}"
+    
     # Redis에서 데이터 가져오기
-    chat_history = redis_client.lrange(redis_key, 0, 9)
-
-    if not chat_history:
-        print(f"No data found for {redis_key}")
-        # decoded_history를 빈 리스트로 초기화
-        decoded_history = []
-    else:
-        # 바이트 문자열을 디코딩하여 사람이 읽을 수 있는 형태로 변환
-        decoded_history = [
-            memory.decode('utf-8', errors='ignore') if isinstance(memory, bytes) else memory
-            for memory in chat_history
-        ]
-        print(f"Data found for {redis_key}: {decoded_history}")
-
-    # 디코딩된 데이터를 반환
-    return decoded_history
+    raw_memories = redis_client.lrange(base_key, 0, -1)
+    
+    if not raw_memories:
+        return []
+        
+    # JSON 디코딩 및 시간순 정렬
+    memories = []
+    for memory in raw_memories:
+        try:
+            decoded = json.loads(memory)
+            memories.append(decoded)
+        except json.JSONDecodeError:
+            continue
+            
+    # 시간순 정렬
+    memories.sort(key=lambda x: datetime.strptime(x["timestamp"], "%Y-%m-%d %H:%M:%S"))
+    
+    # 포맷팅된 문자 반환
+    return [
+        f"[{m['timestamp']}] [{m['type']}] (중요도: {m['importance']}) {m['content']}"
+        for m in memories
+    ]
 
 # 장기 기억 함수
 def store_long_term_memory(uid, persona_name, memory):
-    collection = get_persona_collection(uid, persona_name)
+    """벡터 DB에 통합 메모리 저장"""
+    collection = get_user_collection(uid)
+    
+    # 임베딩 생성
     embedding = embeddings.embed_query(memory)
+    
+    # 메타데이터 구성
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "type": "persona_chat",
+        "persona_name": persona_name,
+        "importance": calculate_importance_llama(memory),
+        "content": memory
+    }
+    
+    # 고유 ID 생성
+    unique_id = f"{uid}_{metadata['type']}_{metadata['persona_name']}_{metadata['timestamp']}"
+    
+    # 컬렉션에 저장
     collection.add(
         documents=[memory],
-        metadatas=[{"timestamp": datetime.now().isoformat()}],
-        ids=[f"{uid}_{persona_name}_{datetime.now().isoformat()}"],
-        embeddings=[embedding]
+        embeddings=[embedding],
+        metadatas=[metadata],
+        ids=[unique_id]
     )
 
 def get_long_term_memory(uid, persona_name, query, limit=3):
-    collection = get_persona_collection(uid, persona_name)
+    """벡터 DB에서 페르소나 관련 메모리 검색"""
+    collection = get_user_collection(uid)
     embedding = embeddings.embed_query(query)
+    
+    # 검색 실행
     results = collection.query(
         query_embeddings=[embedding],
-        n_results=limit
+        n_results=limit,
+        where={"type": "persona_chat", "persona_name": persona_name}
     )
-    return results['documents'][0] if results['documents'] else []
+    
+    # 결과가 있는 경우 content 필드를 반환
+    if results['metadatas'] and results['documents']:
+        formatted_memories = []
+        for metadata, document in zip(results['metadatas'][0], results['documents'][0]):
+            timestamp = metadata.get('timestamp', '')
+            importance = metadata.get('importance', 0)
+            content = metadata.get('content', document)  # content가 없으면 document 사용
+            formatted_memories.append(f"[{timestamp}] (중요도: {importance}) {content}")
+        return formatted_memories
+    return []
 
 def get_user_profile(params):
     try:
@@ -321,12 +412,41 @@ tools = [
     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
-        description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
+        description="""ChromaDB에서 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        {
+            "uid": "사용자ID",
+            "query": "검색할 내용",
+            "limit": 검색 결과 개수 (선택, 기본값: 3),
+            "type": "검색할 메모리 타입" (선택, 생략 가능)
+        }
+        
+        type 옵션:
+        - 생략시: 모든 타입의 메모리 검색
+        - "chat": 일반 채팅 메모리
+        - "persona_chat": 페르소나 채팅 메모리
+        - "event": 일정/이벤트 메모리
+        - "emotion": 감정 메모리
+        - "interaction": 상호작용 메모리
+        - "diary": 일기 메모리
+        
+        반환 형식: [시간] (타입: X) 내용"""
     ),
-    Tool(
+      Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
-        description="Redis에서 단기 기억을 가져옵니다. Input은 'uid'와 'persona_name'을 포함한 JSON 형식의 문자열이어야 합니다."
+        description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        {
+            "uid": "사용자ID",
+            "persona_name": "페르소나이름",
+            "memory_type": "recent/today/weekly" (선택, 기본값: recent)
+        }
+        
+        memory_type 설명:
+        - recent: 최근 1시간 내 기��� (최대 20개)
+        - today: 오늘의 기억 (최대 50개)
+        - weekly: 일주일 내 중요 기억 (최대 100개, 중요도 7 이상)
+        
+        반환 형식: [시간] [타입] (중요도: X) 내용"""
     ),
     Tool(
         name="Search Firestore for user profile",
@@ -343,7 +463,7 @@ tools = [
         func=save_user_event,
         description="user의 캘린더에 이벤트를 저장합니다. Input은 'uid', 'date', 'timestamp', 'title'을 포함한 JSON 형식의 문자열이어야 합니다."
     )
-    # 팔로워 firestore 추가하기
+    # 팔워 firestore 추가하기
 ]
 
 # 프롬프트 템플릿 정의
@@ -399,10 +519,10 @@ for persona in personas:
     persona_info = personas[persona]
     
     search_agent = create_react_agent(
-        llm, 
+        gpt4_model,  # GPT-4 모델 사용
         tools, 
         ChatPromptTemplate.from_template(
-            template,  # 템플릿 문자열만 전달
+            template,
         )
     )
     
@@ -481,7 +601,7 @@ async def simulate_conversation(request: PersonaChatRequest):
             importance = calculate_importance_llama(response['output'])
 
             # 중요도가 8 이상이면 벡터 db에 저장
-            if importance >= 8:
+            if importance >= 5:
                 store_long_term_memory(request.uid, persona, response['output'])
 
             # 현재 페르소나의 응답을 다음 입력으로 설정

@@ -11,6 +11,9 @@ class ChatRequestV2(BaseModel):
     uid: str
     persona_name: str
     user_input: str
+    tone: str | None = None        # Optional
+    example: str | None = None     # Optional
+    description: str | None = None # Optional
 
 class ChatResponse(BaseModel):
     persona_name: str
@@ -67,6 +70,7 @@ class StarEventRequest(BaseModel):
     time: str  # ISO 8601 형식의 시간
     userPhone: str  # 사용자 전화번호 추가
 
+
 class NotificationRequest(BaseModel):
     targetUid: str # 받는 사람의 아이디
     fromUid: str # 보내는 사람의 아이디
@@ -74,3 +78,33 @@ class NotificationRequest(BaseModel):
     message: str # 알림 메시지
     screenType: str # 알림 타입 = 이동할 화면
     URL: str # 이동한(ScreenType) 화면에서 정확한 위치
+
+class GeneratePersonalityRequest(BaseModel):
+    uid: str
+    name: str
+    personality: str
+    speechStyle: str
+
+class UserProfile(BaseModel):
+    uid: str
+    mbti: str
+    personality: List[str]
+    interests: List[str]
+    communication_style: str
+    speaking_style: str
+    emoji_style: str
+    values: List[str]
+    decision_style: str
+
+class CommentInteraction(BaseModel):
+    uid: str
+    content: str
+    interaction_type: str
+
+class ChatRequest(BaseModel):
+    senderId: str          # 메시지 보낸 사용자 ID
+    recipientId: str       # 수신자 ID
+    chatId: str           # 채팅방 ID
+    message: str          # 보낸 메시지
+
+>>>>>>> 499492a11b750e660f2c8934bfd8e0ee70a47a82
