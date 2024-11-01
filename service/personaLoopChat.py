@@ -16,7 +16,7 @@ from google.cloud import firestore
 import json
 import re
 from fastapi import HTTPException
-from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_memory_tool, get_user_profile, get_user_events, save_user_event
+from service.personaChatVer3 import get_long_term_memory_tool, get_short_term_memory_tool, get_user_profile, get_user_events, save_user_event, store_long_term_memory
 import asyncio
 from service.sendNofiticaion import send_expo_push_notification 
 from models import NotificationRequest
@@ -40,9 +40,23 @@ tools = [
     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
-        description="ChromaDB에서 종합적인 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
+        description="""ChromaDB에서 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        {
+            "uid": "사용자ID",
+            "query": "검색할 내용",
+            "limit": 검색 결과 개수 (선택, 기본값: 3),
+            "type": "검색할 메모리 타입" (선택, 생략 가능)
+        }
+        
+        type 옵션:
+        - 생략시: 모든 타입의 메모리 검색
+        - "persona_chat": 페르소나 채팅 메모리만 검색
+        - "event": 이벤트 메모리만 검색
+        - "emotion": 감정 메모리만 검색
+        
+        반환 형식: [시간] (타입: X) 내용"""
     ),
-      Tool(
+    Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
         description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
@@ -90,17 +104,28 @@ Previous conversation:
 Current user message: {input}
 
 IMPORTANT CONVERSATION RULES:
-1. You must generate THREE natural responses in sequence, like a real conversation flow
+1. Generate 1-3 natural responses in sequence (randomly choose how many responses to give)
 2. Each response should build upon the previous one naturally
 3. Use casual, friendly Korean language appropriate for your character
 4. Show natural reactions and emotions
 5. Include appropriate gestures and expressions
 6. React to what the user says before moving to new topics
 
-Example natural conversation flow:
+Example natural conversation flows:
+Single response:
+User: 오늘 너무 피곤해
+Response1: 어머, 그렇구나... 좀 쉬어야겠는데! 
+
+Two responses:
 User: 오늘 너무 피곤해
 Response1: 어머, 그렇구나...
 Response2: 내가 볼때는 좀 쉬어야 할 것 같은데!
+
+Three responses:
+User: 오늘 너무 피곤해
+Response1: 어머, 그렇구나...
+Response2: 내가 볼때는 좀 쉬어야 할 것 같은데!
+Response3: 따뜻한 차라도 한잔 마시면서 휴식을 취해보는 건 어때요?
 
 You have access to the following tools:
 {tools}
@@ -116,13 +141,14 @@ Action Input: the input to the action (must be a valid JSON string)
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know what to say
-Final Answer: your response in the following format:
+Final Answer: your response in the following format (1-3 responses randomly):
 
 Response1: [First natural response with emotion/gesture]
-Response2: [Follow-up response building on the previous one]
-Response3: [Final response to complete the conversation flow]
+Response2: [Follow-up response building on the previous one] (optional)
+Response3: [Final response to complete the conversation flow] (optional)
 
 Remember:
+- Randomly choose to give 1, 2, or 3 responses
 - Act like you're having a real conversation
 - Show genuine emotions and reactions
 - Use your character's unique expressions
@@ -273,7 +299,7 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
             "user_profile": user_profile
         }
         
-        # 사용자 메시지 저장 (채팅 시작 부분에 추가)
+        # 사용자 메시 저장 (채팅 시작 부분에 추가)
         await store_user_interaction(
             uid=chat_request.uid,
             message=chat_request.user_input,
@@ -315,7 +341,7 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
         for _, response_text in sorted(responses):
             cleaned_response = response_text.strip()
             if cleaned_response:
-                await asyncio.sleep(2)  # 딜레이 시간 단축
+                await asyncio.sleep(2)
                 
                 # Firestore에 저장
                 chat_ref.add({
@@ -324,6 +350,7 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                     'message': cleaned_response
                 })
 
+                # 알림 전송
                 notification_request = NotificationRequest(
                     uid=uid, 
                     whoSendMessage=persona_name, 
@@ -331,16 +358,27 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                     pushType="persona_chat"
                 )
                 notification = await send_expo_push_notification(notification_request)
-                print(f"persona_chat_v2 > Notification (채팅 메시지 저장): {notification}")
+                print(f"persona_chat_v2 > Notification: {notification}")
 
-             
-                # 단기 기억에 저장 (Redis) - 수정된 부분
+                # 단기 기억 저장 (Redis)
                 store_short_term_memory(
                     uid=uid,
                     persona_name=actual_persona_name,
                     memory=f"{display_name}: {cleaned_response}"
                 )
-
+                
+                # 벡터 DB에 저장 (중요도 5 이상)
+                memory_content = {
+                    "sender": display_name,
+                    "message": cleaned_response,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "chat_history": conversation_history  # 대화 기록 추가
+                }
+                store_long_term_memory(
+                    uid=uid,
+                    persona_name=actual_persona_name,
+                    memory=json.dumps(memory_content, ensure_ascii=False)
+                )
 
         return {"message": "Conversation completed successfully"}
         
