@@ -42,10 +42,22 @@ tools = [
         func=get_long_term_memory_tool,
         description="ChromaDB에서 종합적인 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
     ),
-    Tool(
+      Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
-        description="Redis에서 단기 기억을 가져옵니다. Input은 'uid'와 'persona_name'을 포함한 JSON 형식의 문자열이어야 합니다."
+        description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        {
+            "uid": "사용자ID",
+            "persona_name": "페르소나이름",
+            "memory_type": "recent/today/weekly" (선택, 기본값: recent)
+        }
+        
+        memory_type 설명:
+        - recent: 최근 1시간 내 기억 (최대 20개)
+        - today: 오늘의 기억 (최대 50개)
+        - weekly: 일주일 내 중요 기억 (최대 100개, 중요도 7 이상)
+        
+        반환 형식: [시간] [타입] (중요도: X) 내용"""
     ),
     Tool(
         name="Search Firestore for user profile",
@@ -137,28 +149,85 @@ agent_executor = AgentExecutor(
 )
 
 def get_conversation_history(uid, persona_name):
-    history = get_short_term_memory(uid, persona_name)
-    return "\n".join(history)
+    # recent와 today의 기억을 모두 가져와서 시간순으로 정렬
+    recent_history = get_short_term_memory(uid, persona_name, "recent")
+    today_history = get_short_term_memory(uid, persona_name, "today")
+    
+    # 두 리스트 합치기
+    all_history = recent_history + today_history
+    
+    # 중복 제거 및 시간순 정렬
+    unique_history = list(set(all_history))
+    unique_history.sort()  # 시간순 정렬
+    
+    return "\n".join(unique_history[-10:])  # 최근 10개만 반환
 
-def get_short_term_memory(uid, persona_name):
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
-    chat_history = redis_client.lrange(redis_key, 0, 9)
+def get_short_term_memory(uid, persona_name, memory_type="recent"):
+    redis_key = f"{uid}:{persona_name}:{memory_type}"
+    chat_history = redis_client.lrange(redis_key, 0, -1)
     
     if not chat_history:
         return []
     
-    decoded_history = [
-        memory.decode('utf-8', errors='ignore') if isinstance(memory, bytes) else memory
-        for memory in chat_history
-    ]
+    decoded_history = []
+    for memory in chat_history:
+        try:
+            if isinstance(memory, bytes):
+                memory = memory.decode('utf-8', errors='ignore')
+            memory_data = json.loads(memory)
+            formatted_memory = f"[{memory_data['timestamp']}] [{memory_data['type']}] (중요도: {memory_data['importance']}) {memory_data['content']}"
+            decoded_history.append(formatted_memory)
+        except (json.JSONDecodeError, KeyError):
+            continue
+            
     return decoded_history
 
 def store_short_term_memory(uid, persona_name, memory):
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    memory_with_time = f"[{current_time}] {memory}"
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
-    redis_client.lpush(redis_key, memory_with_time)
-    redis_client.ltrim(redis_key, 0, 9)
+    # 응답 요약
+    summary = memory  # 필요한 경우 summarize_content(memory) 사용
+    
+    # 현재 시간 추가
+    current_time = datetime.now()
+    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 메모리 데이터 구조화
+    memory_data = {
+        "timestamp": timestamp,
+        "content": summary,
+        "importance": 5,  # 기본 중요도, 필요시 calculate_importance_llama(memory) 사용
+        "type": "chat"
+    }
+    
+    # JSON으로 직렬화
+    memory_json = json.dumps(memory_data, ensure_ascii=False)
+    
+    # 시간대별 저장
+    time_keys = {
+        "recent": {
+            "key": f"{uid}:{persona_name}:recent",
+            "max_items": 20,
+            "ttl": 3600
+        },
+        "today": {
+            "key": f"{uid}:{persona_name}:today",
+            "max_items": 50,
+            "ttl": 86400
+        },
+        "weekly": {
+            "key": f"{uid}:{persona_name}:weekly",
+            "max_items": 100,
+            "ttl": 604800
+        }
+    }
+    
+    # 각 시간대별로 저장
+    for storage_type, config in time_keys.items():
+        if storage_type == "weekly" and memory_data["importance"] < 7:
+            continue
+            
+        redis_client.lpush(config["key"], memory_json)
+        redis_client.ltrim(config["key"], 0, config["max_items"] - 1)
+        redis_client.expire(config["key"], config["ttl"])
 
 async def persona_chat_v2(chat_request: ChatRequestV2):
     print("personaLoopChat > persona_chat_v2 > chat_request : ", chat_request)
@@ -265,11 +334,11 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 print(f"persona_chat_v2 > Notification (채팅 메시지 저장): {notification}")
 
              
-                # 단기 기억에 저장 (Redis)
+                # 단기 기억에 저장 (Redis) - 수정된 부분
                 store_short_term_memory(
                     uid=uid,
-                    persona_name=actual_persona_name,  # 'custom' 사용
-                    memory=f"{display_name}: {cleaned_response}"  # '피카츄: 메시지' 형식으로 저장
+                    persona_name=actual_persona_name,
+                    memory=f"{display_name}: {cleaned_response}"
                 )
 
 

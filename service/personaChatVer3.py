@@ -24,13 +24,11 @@ from langchain_ollama import OllamaLLM  # 새로운 import 문
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# Local Sllm API URL 설정
-LLAMA_API_URL = "http://http://192.168.0.119:11434/api/generate"
-
 # Ollama 대신 OllamaLLM 사용
 llm = OllamaLLM(
-    model="jmpark333/exaone",
-    base_url="http://192.168.0.119:11434/"
+    model="swchoi1994/exaone3-7-q8_0-gguf:latest",
+    base_url="http://192.168.0.119:11434",
+    temperature=0.5
 )
 
 # GPT-4 모델 추가
@@ -175,37 +173,78 @@ def store_short_term_memory(uid, persona_name, memory):
     summary = summarize_content(memory)
     
     # 현재 시간 추가
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = datetime.now()
+    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
     
-    # 대화 내용과 시간을 함께 저장
-    memory_with_time = f"[{current_time}] {summary}"
+    # 메모리 데이터 구조화
+    memory_data = {
+        "timestamp": timestamp,
+        "content": summary,
+        "importance": calculate_importance_llama(memory),
+        "type": "chat"  # 'chat', 'event', 'emotion' 등으로 구분 가능
+    }
     
-    # Redis에 저장
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
-    redis_client.lpush(redis_key, memory_with_time)
-    redis_client.ltrim(redis_key, 0, 9)  # 단기 기억 9개만 유지
+    # JSON으로 직렬화
+    memory_json = json.dumps(memory_data, ensure_ascii=False)
+    
+    # Redis 키 설정
+    base_key = f"{uid}:{persona_name}"
+    
+    # 시간대별 저장
+    time_keys = {
+        "recent": {
+            "key": f"{base_key}:recent",
+            "max_items": 20,
+            "ttl": 3600  # 1시간
+        },
+        "today": {
+            "key": f"{base_key}:today",
+            "max_items": 50,
+            "ttl": 86400  # 24시간
+        },
+        "weekly": {
+            "key": f"{base_key}:weekly",
+            "max_items": 100,
+            "ttl": 604800  # 1주일
+        }
+    }
+    
+    # 각 시간대별로 저장
+    for storage_type, config in time_keys.items():
+        # 중요도가 7 이상인 경우만 weekly에 저장
+        if storage_type == "weekly" and memory_data["importance"] < 7:
+            continue
+            
+        redis_client.lpush(config["key"], memory_json)
+        redis_client.ltrim(config["key"], 0, config["max_items"] - 1)
+        redis_client.expire(config["key"], config["ttl"])
 
-
-def get_short_term_memory(uid, persona_name):
-    # Redis Key 출력
-    redis_key = f"{uid}:{persona_name}:short_term_memory"
+def get_short_term_memory(uid, persona_name, memory_type="recent"):
+    base_key = f"{uid}:{persona_name}:{memory_type}"
+    
     # Redis에서 데이터 가져오기
-    chat_history = redis_client.lrange(redis_key, 0, 9)
-
-    if not chat_history:
-        print(f"No data found for {redis_key}")
-        # decoded_history를 빈 리스트로 초기화
-        decoded_history = []
-    else:
-        # 바이트 문자열을 디코딩하여 사람이 읽을 수 있는 형태로 변환
-        decoded_history = [
-            memory.decode('utf-8', errors='ignore') if isinstance(memory, bytes) else memory
-            for memory in chat_history
-        ]
-        print(f"Data found for {redis_key}: {decoded_history}")
-
-    # 디코딩된 데이터를 반환
-    return decoded_history
+    raw_memories = redis_client.lrange(base_key, 0, -1)
+    
+    if not raw_memories:
+        return []
+        
+    # JSON 디코딩 및 시간순 정렬
+    memories = []
+    for memory in raw_memories:
+        try:
+            decoded = json.loads(memory)
+            memories.append(decoded)
+        except json.JSONDecodeError:
+            continue
+            
+    # 시간순 정렬
+    memories.sort(key=lambda x: datetime.strptime(x["timestamp"], "%Y-%m-%d %H:%M:%S"))
+    
+    # 포맷팅된 문자열 반환
+    return [
+        f"[{m['timestamp']}] [{m['type']}] (중요도: {m['importance']}) {m['content']}"
+        for m in memories
+    ]
 
 # 장기 기억 함수
 def store_long_term_memory(uid, persona_name, memory):
@@ -355,10 +394,22 @@ tools = [
         func=get_long_term_memory_tool,
         description="ChromaDB에서 장기 기억을 가져옵니다. Input은 'uid', 'persona_name', 'query', 그리고 'limit'을 int 포함한 JSON 형식의 문자열이어야 합니다."
     ),
-    Tool(
+      Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
-        description="Redis에서 단기 기억을 가져옵니다. Input은 'uid'와 'persona_name'을 포함한 JSON 형식의 문자열이어야 합니다."
+        description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        {
+            "uid": "사용자ID",
+            "persona_name": "페르소나이름",
+            "memory_type": "recent/today/weekly" (선택, 기본값: recent)
+        }
+        
+        memory_type 설명:
+        - recent: 최근 1시간 내 기억 (최대 20개)
+        - today: 오늘의 기억 (최대 50개)
+        - weekly: 일주일 내 중요 기억 (최대 100개, 중요도 7 이상)
+        
+        반환 형식: [시간] [타입] (중요도: X) 내용"""
     ),
     Tool(
         name="Search Firestore for user profile",
