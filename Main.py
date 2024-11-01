@@ -1,13 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI,  HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
 
 from models import ChatRequest, ChatResponse, FeedPost, PersonaChatRequest, TaskRequest, SmsRequest, StarEventRequest, ChatRequestV2, GeneratePersonalityRequest, UserProfile, CommentInteraction
 import logging
-import requests
 from models import NotificationRequest
 from service.sendNofiticaion import send_expo_push_notification
 from service.services import (
@@ -15,37 +12,21 @@ from service.services import (
     get_personas,
     create_feed_post,
     persona_chat,
-    generate_daily_schedule,
     schedule_tasks,
     create_task,
     generate_and_save_user_schedule,
     get_user_schedule,
 )
-
-from generate_image import (
-    generate_persona_image,
-    regenerate_image,
-)
-
 from typing import List
 from datetime import datetime, timedelta
 import pytz
 from dateutil import parser
-from firebase_admin import auth
-from firebase_admin import firestore
 from database import db
-# from villageServices import get_all_agents
-from fastapi import WebSocket, Request   
-# from villageServices import (
-#     get_all_agents,
-#     AgentManager  # 에이전트 관리를 위한 클래스
-# )
+from fastapi import Request   
 from service.personaLoopChat import persona_chat_v2
 from service.personaChatVer3 import simulate_conversation
 from service.smsservice import send_sms_service
-from service.personaSms import star_event
 import uvicorn
-from pytz import timezone
 from personaDebate import run_persona_debate
 
 from service.personaGenerate import generate_personality
@@ -54,8 +35,6 @@ from service.interactionStore import store_user_interaction
 from service.aiChatService import handle_offline_chat_service
 
 from fastapi.middleware.cors import CORSMiddleware
-
-
 
 # 스케줄러 초기화
 scheduler = AsyncIOScheduler(
@@ -145,7 +124,6 @@ async def chat_endpoint(chat_request: ChatRequest):
 
 @app.post("/v2/chat")
 async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
-    print("@app.post > persona_chat_v2_endpoint 호출")  
     try:
         return await persona_chat_v2(chat_request)
     except Exception as e:
@@ -194,41 +172,6 @@ async def get_user_schedule_endpoint(uid: str):
     if schedule:
         return schedule
     raise HTTPException(status_code=404, detail="Schedule not found for this user")
-
-# @app.get("/api/agents/{uid}")
-# async def read_agents(uid: str):
-#     try:
-#         agents = get_all_agents(uid)
-#         return agents
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-    
-# WebSocket 엔드포인트
-# agent_manager = AgentManager()
-
-# @app.websocket("/ws/{uid}")
-# async def websocket_endpoint(websocket: WebSocket, uid: str):
-#     await agent_manager.connect(websocket)
-#     try:
-#         while True:
-#             # 에이전트 상태 업데이트
-#             agent_manager.apply_schedule_to_agents(uid)
-#             agent_manager.update_agents()
-#             # 에이전트 위치 정보를 전송
-#             positions = agent_manager.get_agents_positions()
-#             await agent_manager.broadcast(str(positions))
-#             await asyncio.sleep(1)  # 1초마다 업데이트
-#     except WebSocketDisconnect:
-#         agent_manager.disconnect(websocket)
-
-@app.post("/generate-persona-image/{uid}")
-async def generate_persona_image_endpoint(uid: str, image : UploadFile=File(...)):
-    return await generate_persona_image(uid,image)
-
-@app.post("/regenerate-image/{emotion}")
-async def regenerate_image_endpoint(emotion: str, image : UploadFile=File(...)):
-    return await regenerate_image(emotion, image)
-
 
 @app.get("/networkcheck")
 async def network_check_endpoint():
@@ -317,8 +260,6 @@ async def store_comment_interaction(comment_data: CommentInteraction):
         interaction_type=comment_data.interaction_type
     )
 
-
-
 @app.post("/clone-chat")
 async def clone_chat_endpoint(chat_request: ChatRequest):
     return await handle_offline_chat_service(chat_request)
@@ -326,15 +267,6 @@ async def clone_chat_endpoint(chat_request: ChatRequest):
 @app.post("/notification")
 async def notification_endpoint(request: NotificationRequest):
     return await send_expo_push_notification(request)
-
-
-# @app.websocket("/ws")
-# async def websocket_endpoint(websocket : WebSocket):
-#     await websocket.accept()
-#     while True:
-#         data = await websocket.receive_text()
-#         print("data : ", data)
-#         await websocket.send_text(f"Message received: {data}")
 
 if __name__ == "__main__":
     print("FastAPI 서버 시작")
