@@ -290,6 +290,8 @@ async def star_event_endpoint(request: StarEventRequest):
 
 @app.post("/notification")
 async def notification_endpoint(request: NotificationRequest):
+    print("@app.post > notification_endpoint 호출") 
+    print("request : ", request)
     return await send_expo_push_notification(request)
 
 # @app.websocket("/ws")
