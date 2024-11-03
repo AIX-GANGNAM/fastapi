@@ -37,23 +37,22 @@ async def send_expo_push_notification(notification_request: NotificationRequest)
             # ex) 좋아요 알림, 최창욱님이 당신의 피드에 좋아요를 눌렀어요.
             # ex) 친구요청 알림, 최창욱님이 당신에게 친구요청을 보냈어요.
             payload = {
-                "to": targetExpo_token, # 받는 사람의 푸시 토큰
-                "sound": 'default', # 알림 소리
-                "title": f"{whoSendMessage}", # 알림 제목
-                "body": message, # 알림 메시지          
-                "priority": "high",          # 알림 우선순위를 높게 설정
-                "channelId": 'default', # 알림 채널 아이디
+                "to": targetExpo_token,
+                "sound": 'default',
+                "title": f"{whoSendMessage}",
+                "body": message,
+                "priority": "high",        
+                "channelId": 'channel_high', # Android API26 오레오 버전부터 Notification Channel을 추가해야 -> Head up notification 사용 가능
                 "data": {
-                    "whoSendMessage":  whoSendMessage, # 알림 보내는 사람의 아이디 or 이메일 or 페르소나 이름
-                    "highlightTitle": screenType, # 알람이 보여질 때 표시될 제목
-                    "fromUid": fromUid, # 알림 보내는 사람의 아이디
-                    "highlightImage": 'https://example.com/default-image.jpg', # 알림 보내는 사람 이미지 // 이건 수정 해야 
-                    "screenType": screenType, # 어떤 타입으로 알람을 보내는지 (ex. 페르소나 알림, 채팅 알림, 채팅 메시지 알림)
-                    "URL": URL, # 알림 클릭 시 이동할 URL
-                    "pushTime": datetime.now().isoformat(), # 푸시 알람 시간
-                    "priority": "high", # 알림 우선순위를 높게 설정
-                },
-            }
+                    "whoSendMessage": whoSendMessage,
+                    "highlightTitle": screenType,
+                    "fromUid": fromUid,
+                    "highlightImage": 'https://example.com/default-image.jpg',
+                    "screenType": screenType,
+                    "URL": URL,
+                    "pushTime": datetime.now().isoformat(),
+                }
+            }   
             print("services > send_expo_push_notification > payload : ", payload)
 
             # Expo 서버로 푸시 알림 요청 전송

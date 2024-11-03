@@ -107,4 +107,3 @@ class ChatRequest(BaseModel):
     chatId: str           # 채팅방 ID
     message: str          # 보낸 메시지
 
->>>>>>> 499492a11b750e660f2c8934bfd8e0ee70a47a82
