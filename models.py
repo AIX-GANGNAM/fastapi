@@ -72,11 +72,12 @@ class StarEventRequest(BaseModel):
 
 
 class NotificationRequest(BaseModel):
-    uid: str
-    whoSendMessage: str
-    message: str
-    pushType: str
-
+    targetUid: str # 받는 사람의 아이디
+    fromUid: str # 보내는 사람의 아이디
+    whoSendMessage: str # 보내는 사람의 이름
+    message: str # 알림 메시지
+    screenType: str # 알림 타입 = 이동할 화면
+    URL: str # 이동한(ScreenType) 화면에서 정확한 위치
 
 class GeneratePersonalityRequest(BaseModel):
     uid: str

@@ -266,6 +266,8 @@ async def clone_chat_endpoint(chat_request: ChatRequest):
 
 @app.post("/notification")
 async def notification_endpoint(request: NotificationRequest):
+    print("@app.post > notification_endpoint 호출") 
+    print("request : ", request)
     return await send_expo_push_notification(request)
 
 if __name__ == "__main__":
