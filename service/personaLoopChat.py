@@ -22,7 +22,7 @@ from service.sendNofiticaion import send_expo_push_notification
 from models import NotificationRequest
 from service.interactionStore import store_user_interaction
 
-model = ChatOpenAI(model="gpt-4o",temperature=0.5)
+model = ChatOpenAI(model="gpt-4o",temperature=0.5,streaming=False)
 web_search = TavilySearchResults(max_results=1)
 embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
 
@@ -53,6 +53,7 @@ tools = [
         - "persona_chat": 페르소나 채팅 메모리만 검색
         - "event": 이벤트 메모리만 검색
         - "emotion": 감정 메모리만 검색
+        - "clone": 사용자 분신 채팅 메모리만 검색
         
         반환 형식: [시간] (타입: X) 내용"""
     ),

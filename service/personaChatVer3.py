@@ -22,7 +22,8 @@ from firebase_admin import firestore
 from database import db
 from langchain_ollama import OllamaLLM  # 새로운 import 문
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_core.runnables import RunnableSequence
+from langchain_openai import ChatOpenAI
 
 # Ollama 대신 OllamaLLM 사용
 llm = OllamaLLM(
@@ -34,71 +35,55 @@ llm = OllamaLLM(
 # GPT-4 모델 추가
 gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
 
-def calculate_importance_llama(content):
-    prompt = PromptTemplate(
-        input_variables=["content"],
-        template="""시스템: 당신은 대화의 중요도를 평가하는 분석 시스템입니다. 
-        오직 1에서 10 사이의 정수만 출력해야 합니다.
-        
-        평가 기준:
-        1-3: 일상적인 대화, 인사, 가벼운 잡담
-        4-6: 개인적 경험, 감정 공유, 일반적인 의견 교환
-        7-8: 중요한 정보, 깊은 통찰, 강한 감정 표현
-        9-10: 매우 중요한 결정, 핵심 정보, 강력한 감정적 순간
-
-        분석할 대화:
-        "{content}"
-
-        중요도 점수:"""
-    )
-    
-    # GPT-4 모델 사용
-    chain = LLMChain(llm=gpt4_model, prompt=prompt)
-    result = chain.invoke({"content": content})
-    
+async def calculate_importance_llama(text: str) -> int:
+    """텍스트의 중요도를 계산"""
     try:
-        importance = re.search(r'\b([1-9]|10)\b', result['text'])
-        if importance:
-            return int(importance.group())
-        else:
-            return 5  # 기본값
-    except (AttributeError, ValueError):
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+        prompt = PromptTemplate.from_template("""
+        다음 텍스트의 중요도를 1-10 사이의 숫자로 평가해주세요.
+        평가 기준:
+        - 감정적 강도
+        - 정보의 가치
+        - 기억할 필요성
+        
+        텍스트: {text}
+        
+        중요도 (1-10):""")
+        
+        # 새로운 방식으로 체인 구성
+        chain = prompt | llm
+        
+        # 체인 실행
+        result = await chain.ainvoke({"text": text})
+        importance = int(result.content.strip())
+        
+        return max(1, min(10, importance))  # 1-10 사이로 제한
+        
+    except Exception as e:
+        print(f"중요도 계산 중 오류: {str(e)}")
         return 5  # 오류 발생시 기본값
 
-def summarize_content(content):
-    prompt = PromptTemplate(
-        input_variables=["content"],
-        template="""시스템: 당신은 대화 내용을 정확하고 간단히 요약하는 전문가입니다.
-
-        요약 규칙:
-        1. 최대 50자 이내로 요약하세요
-        2. 핵심 내용과 감정만 포함하세요
-        3. 불필요한 설명이나 부연 설명을 제외하세요
-        4. 객관적이고 명확한 문장으로 작성하세요
-        5. 다음 형식을 반드시 지키세요: [감정/태도] + 핵심 메시지
-
-        예시:
-        입력: "나는 정말 화가 나! 어제 친구가 약속을 어겼어. 세 시간이나 기다렸다고!"
-        출력: [분노] 친구의 약속 불이행으로 3시간 대기
-
-        입력: "오늘 날씨가 너무 좋아서 기분이 좋아. 공원에서 산책하면서 커피도 마셨어."
-        출력: [긍정] 좋은 날씨에 공원 산책과 커피
-
-        분석할 대화:
-        "{content}"
-
-        요약:"""
-    )
-    
-    chain = LLMChain(llm=llm, prompt=prompt)
-    result = chain.invoke({"content": content})
-    summary = result['text'].strip()
-    
-    # 50자 제한 적용
-    if len(summary) > 50:
-        summary = summary[:47] + "..."
+async def summarize_content(text: str) -> str:
+    """텍스트 요약"""
+    try:
+        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+        prompt = PromptTemplate.from_template("""
+        다음 텍스트를 50자 이내로 핵심만 간단히 요약해주세요:
         
-    return summary
+        텍스트: {text}
+        
+        요약:""")
+        
+        # 새로운 방식으로 체인 구성
+        chain = prompt | llm
+        
+        # 체인 실행
+        result = await chain.ainvoke({"text": text})
+        return result.content.strip()
+        
+    except Exception as e:
+        print(f"요약 중 오류: {str(e)}")
+        return text[:50] + "..."  # 오류 발생시 단순 절삭
 
 def get_long_term_memory_tool(params):
     """벡터 DB에서 메모리 검색 도구"""
@@ -409,7 +394,7 @@ tools = [
         func=lambda _: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # 인수를 받도록 수정
         description="ALWAYS use this tool FIRST to get the current date and time before performing any task or search."
     ),
-    Tool(
+     Tool(
         name="Long Term Memory",
         func=get_long_term_memory_tool,
         description="""ChromaDB에서 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
@@ -422,12 +407,10 @@ tools = [
         
         type 옵션:
         - 생략시: 모든 타입의 메모리 검색
-        - "chat": 일반 채팅 메모리
-        - "persona_chat": 페르소나 채팅 메모리
-        - "event": 일정/이벤트 메모리
-        - "emotion": 감정 메모리
-        - "interaction": 상호작용 메모리
-        - "diary": 일기 메모리
+        - "persona_chat": 페르소나 채팅 메모리만 검색
+        - "event": 이벤트 메모리만 검색
+        - "emotion": 감정 메모리만 검색
+        - "clone": 사용자 분신 채팅 메모리만 검색
         
         반환 형식: [시간] (타입: X) 내용"""
     ),
@@ -442,7 +425,7 @@ tools = [
         }
         
         memory_type 설명:
-        - recent: 최근 1시간 내 기��� (최대 20개)
+        - recent: 최근 1시간 내 기억 (최대 20개)
         - today: 오늘의 기억 (최대 50개)
         - weekly: 일주일 내 중요 기억 (최대 100개, 중요도 7 이상)
         
