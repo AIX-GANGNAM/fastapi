@@ -23,7 +23,7 @@ from models import AllPersonasSchedule, PersonaSchedule, ScheduleItem
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from personaCommentDebate import run_comment_debate, FeedCommentRequest
+from personaCommentDebate import run_debate, FeedCommentRequest
 from service.interactionStore import store_user_interaction
 # OpenAI 객체를 생성합니다.
 model = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
@@ -358,7 +358,7 @@ async def create_feed_post(post):
             model="text-embedding-ada-002"
         ).data[0].embedding
 
-        collection = client.get_or_create_collection(f"feed_{post.userId}")
+        collection = get_persona_collection(post.userId, "feed")
         collection.add(
             documents=[json.dumps(feed_doc.get().to_dict())],
             embeddings=[embedding],
@@ -382,7 +382,7 @@ async def create_feed_post(post):
             comment_count=2
         )
 
-        await run_comment_debate(comment_debate_request)
+        await run_debate(comment_debate_request)
 
         return {"message": "Feed post updated successfully", "image_description": image_description}
 

@@ -6,6 +6,7 @@ from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from models import GeneratePersonalityRequest
 from database import db  # database.py에서 Firestore 클라이언트 import
+from personas import personas
 
 # GPT-4 모델 초기화
 gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
@@ -54,7 +55,7 @@ async def generate_personality(request: GeneratePersonalityRequest):
         })
         
         # 결과 파싱
-        response_text = result['text'].strip()
+        response_text = result.content.strip()
         sections = {}
         current_section = None
         
@@ -101,10 +102,40 @@ async def generate_personality(request: GeneratePersonalityRequest):
                 "example": clone_result.get('example', '')
             }
             
+            # 기본 페르소나 생성
+            default_personas = [
+                {
+                    "Name": "Joy",
+                    "DPNAME": "기쁨이",
+                    "description": personas["Joy"]["description"],
+                    "tone": personas["Joy"]["tone"],
+                    "example": personas["Joy"]["example"]
+                },
+                {
+                    "Name": "Anger",
+                    "DPNAME": "화남이",
+                    "description": personas["Anger"]["description"],
+                    "tone": personas["Anger"]["tone"],
+                    "example": personas["Anger"]["example"]
+                },
+                {
+                    "Name": "Sadness",
+                    "DPNAME": "슬픔이",
+                    "description": personas["Sadness"]["description"],
+                    "tone": personas["Sadness"]["tone"],
+                    "example": personas["Sadness"]["example"]
+                }
+            ]
+            
             # 기존 페르소나 업데이트 또는 추가
             updated_personas = []
             custom_exists = False
             clone_exists = False
+            default_exists = {
+                "Joy": False,
+                "Anger": False,
+                "Sadness": False
+            }
             
             for persona in current_personas:
                 if persona.get('Name') == 'custom':
@@ -113,6 +144,10 @@ async def generate_personality(request: GeneratePersonalityRequest):
                 elif persona.get('Name') == 'clone':
                     updated_personas.append(clone_persona)
                     clone_exists = True
+                elif persona.get('Name') in default_exists:
+                    default_exists[persona.get('Name')] = True
+                    # 기존 기본 페르소나 유지
+                    updated_personas.append(persona)
                 else:
                     updated_personas.append(persona)
             
@@ -121,6 +156,11 @@ async def generate_personality(request: GeneratePersonalityRequest):
                 updated_personas.append(new_persona)
             if not clone_exists:
                 updated_personas.append(clone_persona)
+                
+            # 없는 기본 페르소나 추가
+            for default_persona in default_personas:
+                if not default_exists[default_persona["Name"]]:
+                    updated_personas.append(default_persona)
             
             # Firestore 업데이트
             user_ref.update({
@@ -130,8 +170,34 @@ async def generate_personality(request: GeneratePersonalityRequest):
             print(f"페르소나와 분신이 성공적으로 저장되었습니다")
         else:
             # 사용자 문서가 없는 경우 새로 생성
+            default_personas = [
+                {
+                    "Name": "Joy",
+                    "DPNAME": "기쁨이",
+                    "description": personas["Joy"]["description"],
+                    "tone": personas["Joy"]["tone"],
+                    "example": personas["Joy"]["example"]
+                },
+                {
+                    "Name": "Anger",
+                    "DPNAME": "화남이",
+                    "description": personas["Anger"]["description"],
+                    "tone": personas["Anger"]["tone"],
+                    "example": personas["Anger"]["example"]
+                },
+                {
+                    "Name": "Sadness",
+                    "DPNAME": "슬픔이",
+                    "description": personas["Sadness"]["description"],
+                    "tone": personas["Sadness"]["tone"],
+                    "example": personas["Sadness"]["example"]
+                },
+                new_persona,
+                clone_persona
+            ]
+            
             user_ref.set({
-                'persona': [new_persona, clone_persona]
+                'persona': default_personas
             })
             print(f"새로운 사용자 문서가 생성되었습니다: {request.uid}")
         
@@ -164,7 +230,7 @@ async def generate_clone_data(user_name: str):
         "speechStyle": clone_speech
     })
     
-    response_text = result['text'].strip()
+    response_text = result.content.strip()
     sections = {}
     current_section = None
     

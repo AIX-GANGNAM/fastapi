@@ -1,4 +1,4 @@
-from database import db, redis_client
+from database import db, redis_client, store_memory_to_vectordb, query_memories
 from google.cloud import firestore
 from service.personaLoopChat import (
     model, tools, get_short_term_memory, 
@@ -15,6 +15,7 @@ from service.interactionStore import store_user_interaction
 from langchain.tools import Tool
 from langchain.tools.render import format_tool_to_openai_function
 import re
+import json
 
 # 시스템 메시지 템플릿을 ReAct 형식으로 수정
 TEMPLATE = """당신은 {persona_name}입니다. 사용자의 분신으로서, 원래 사용자를 완벽하게 대신하여 대화를 이어가야 합니다.
@@ -28,6 +29,7 @@ TEMPLATE = """당신은 {persona_name}입니다. 사용자의 분신으로서, �
 {conversation_history}
 
 현재 받은 메시지: {input}
+사용자 ID: {uid}
 
 페르소나 역할 수행 가이드라인:
 1. 항상 실제 사용자처럼 자연스럽게 대화해주세요
@@ -58,6 +60,7 @@ prompt = PromptTemplate(
     template=TEMPLATE,
     input_variables=[
         "input",
+        "uid",
         "persona_name",
         "persona_description",
         "persona_tone",
@@ -126,9 +129,32 @@ async def get_recipient_clone(uid: str):
         print(f"User doc data: {user_doc.to_dict() if user_doc.exists else 'No doc'}")
         raise Exception(f"Clone 페르소나 조회 실패: {str(e)}")
 
+async def store_long_term_memory(chat_request: ChatRequest, message: str):
+    """장기 기억 저장"""
+    try:
+        memory_content = {
+            "sender": "clone",
+            "message": message,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        # 벡터 DB에 저장
+        store_memory_to_vectordb(
+            uid=chat_request.recipientId,
+            content=json.dumps(memory_content, ensure_ascii=False),
+            metadata={
+                "type": "clone",
+                "persona_name": "clone",
+                "importance": 5  # 기본 중요도
+            }
+        )
+    except Exception as e:
+        print(f"장기 기억 저장 오류: {str(e)}")
+
 async def generate_ai_response(recipient_clone, chat_request: ChatRequest) -> str:
     """AI 응답 생성"""
     try:
+        # 대화 기록 가져오기
         conversation_history = get_conversation_history(
             chat_request.recipientId, 
             'clone'
@@ -141,6 +167,7 @@ async def generate_ai_response(recipient_clone, chat_request: ChatRequest) -> st
 
         agent_input = {
             "input": chat_request.message,
+            "uid": chat_request.recipientId,  # recipientId 추가
             "persona_name": recipient_clone['DPNAME'],
             "persona_description": recipient_clone['description'],
             "persona_tone": recipient_clone['tone'],
@@ -200,13 +227,17 @@ async def save_chat_message(chat_request: ChatRequest, message: str, is_ai: bool
             'info.lastSenderId': message_data['senderId']
         })
 
-        # AI 응답인 경우 단기 기억 저장
+        # AI 응답인 경우 단기 기억과 장기 기억 모두 저장
         if is_ai:
+            # 단기 기억 저장
             store_short_term_memory(
                 uid=chat_request.recipientId,
                 persona_name='clone',
                 memory=f"User: {chat_request.message}\nClone: {message}"
             )
+            
+            # 장기 기억 저장
+            await store_long_term_memory(chat_request, message)
 
     except Exception as e:
         print(f"메시지 저장 오류: {str(e)}")
