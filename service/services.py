@@ -1,4 +1,4 @@
-from database import db, client, aiclient, get_persona_collection
+from database import db, client, aiclient, get_persona_collection, store_long_term_memory
 from personas import personas
 from utils import get_current_time_str, generate_unique_id, parse_firestore_timestamp
 from fastapi import HTTPException, BackgroundTasks
@@ -50,7 +50,7 @@ prompt = prompt.partial(
 
 chain = prompt | model | parser
 
-my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오트밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동 하고, 집에 와 간단히 저녁을 먹 10시 30분에 잠들었다."5. "주말 아침, 8에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
+my_persona = '1. "오늘 아침 6시에 일어나 30분 동안 요가를 했다. 샤워 후 간단한 아침 식사로 오밀과 과일을 먹었다. 8시에 출근해서 오전 회의에 석했고, 점심은 동료들과 회사 근처 샐러드 바에서 먹었다. 오후에는 프로젝트 보고서를 작성하고, 6시에 퇴근했다. 저녁에는 집에서 넷플릭스로 드라마를 한 편 보고 11시에 취침했다."2. "오늘은 휴일이라 늦잠을 자고 10시에 일어났다. 브런치로 팬케이크를 만들어 먹고, 오후에는 친구와 약속이 있어 카페에서 만났다. 함께 영화를 보고 저녁식사로 이탈리안 레스토랑에 갔다. 집에 돌아와 독서를 하다가 12시경 잠들었다."3. "아침 7시에 기상해서 공원에서 5km 조깅을 했다. 집에 돌아와 샤워하고 출근 준비를 했다. 재택근무 날이라 집에서 일했는데, 오전에 화상회의가 있었고 오후에는 보고서 작성에 집중했다. 저녁에는 요리를 해먹고, 기타 연습을 1시간 했다. 10시 30분에 취침했다."4. "오늘은 6시 30분에 일어나 아침 뉴스를 보며 커피를 마셨다. 8시에 출근해서 오전 내내 고객 미팅을 했다. 점심은 바쁜 일정 때문에 사무실에서 도시락으로 해결했다. 오후에는 팀 의와 이메일 처리로 시간을 보냈다. 퇴근 후 헬스장에 들러 1시간 운동 하고, 집에 와 간단히 저녁을 먹 10시 30분 잠들었다."5. "주말 아침, 8에 일어 베이킹을 했다. 직접 만든 빵으로 아침을 먹고, 오전에는 집 대청소를 했다. 점심 후에는 근처 도서관에 가서 2시간 동안 책을 읽었다. 저녁에는 가족들과 함께 바비큐 파티를 열어 즐거운 시간을 보냈다. 밤에는 가족과 보드게임을 하다가 11시 30분에 잠들었다."'
 
 
 def generate_daily_schedule(user_schedule: str):
@@ -123,14 +123,12 @@ def get_relevant_conversations(uid: str, persona_name: str, query: str, limit: i
     return conversations
 
 def get_relevant_feed_posts(uid, query, k=3): # 사용자의 피드 중 관련된 피드를 가져오는 함수 벡터db서치
-    collection = client.get_or_create_collection(f"feed_{uid}")
-    query_embedding = aiclient.embeddings.create(
-        input=query,
-        model="text-embedding-ada-002"
-    ).data[0].embedding
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=k
+    results = query_memories(
+        uid=uid,
+        query=query,
+        memory_type="feed_post",  # 피드 포스트 타입으로 검색
+        persona_name="feed",
+        limit=k
     )
     if results['documents']:
         parsed_docs = []
@@ -342,16 +340,26 @@ async def create_feed_post(post):
         )
 
         image_description = analysis.choices[0].message.content.strip()
-
-        # 직접 문서 참조
-        feed_doc = db.collection('feeds').document(post.id)
         
-        # 이미지 설명 추가
+        # Redis에 단기 기억 저장
+        memory_content = f"주인이 새로운 피드를 올렸어: {post.caption}"
+        if image_description:
+            memory_content += f" (이미지: {image_description})"
+            
+        await store_user_interaction(
+            uid=post.userId,
+            message=memory_content,
+            interaction_type='feed',
+            importance=8  # 피드 게시는 중요한 이벤트로 간주
+        )
+
+        # Firestore 피드 문서 업데이트
+        feed_doc = db.collection('feeds').document(post.id)
         feed_doc.update({
             'image_description': image_description
         })
 
-        # 벡터 DB에 저장
+        # 벡터 DB 저장
         embedding_text = f"{post.caption} {image_description}"
         embedding = aiclient.embeddings.create(
             input=embedding_text,
@@ -366,13 +374,6 @@ async def create_feed_post(post):
             ids=[post.id]
         )
 
-        # 사용자 메시지 저장 (채팅 시작 부분에 추가)
-        await store_user_interaction(
-            uid=post.userId,
-            message=post.caption,
-            interaction_type='feed'
-        )
-
         # 댓글 생성 요청
         comment_debate_request = FeedCommentRequest(
             uid=post.userId,
@@ -383,6 +384,15 @@ async def create_feed_post(post):
         )
 
         await run_debate(comment_debate_request)
+
+        # 피드 내용을 장기 메모리로 저장
+        feed_content = f"Caption: {post.caption}\nImage Description: {image_description}"
+        store_long_term_memory(
+            uid=post.userId,
+            persona_name="feed",
+            memory=feed_content,
+            memory_type="feed_post"  # 피드 포스트 타입 지정
+        )
 
         return {"message": "Feed post updated successfully", "image_description": image_description}
 

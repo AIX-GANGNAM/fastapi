@@ -146,7 +146,7 @@ async def persona_chat_endpoint(chat_request: PersonaChatRequest):
 
 @app.post("/v3/persona-chat") # 이게 최신버전임
 async def persona_chat_v3_endpoint(chat_request: PersonaChatRequest):
-    return await simulate_conversation(chat_request)
+    return await persona_chat_v2(chat_request)
 
 @app.post("/execute-task") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):

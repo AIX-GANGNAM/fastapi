@@ -38,7 +38,6 @@ profile_prompt = PromptTemplate(
     template=profile_persona_template
 )
 
-# 새로운 방식으로 체인 생성
 profile_chain = profile_prompt | gpt4_model
 
 async def update_clone_personality(profile: UserProfile):

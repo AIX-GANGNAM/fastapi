@@ -29,27 +29,29 @@ def get_user_collection(uid):
     """사용자별 단일 컬렉션 생성 또는 가져오기"""
     return client.get_or_create_collection(f"user_{uid}_memories")
 
-def store_memory_to_vectordb(uid: str, content: str, metadata: dict):
+def store_long_term_memory(uid: str, persona_name: str, memory: str, memory_type: str):
     """벡터 DB에 통합 메모리 저장"""
     collection = get_user_collection(uid)
-    
+
     # 임베딩 생성
     embedding = aiclient.embeddings.create(
-        input=content,
+        input=memory,
         model="text-embedding-ada-002"
     ).data[0].embedding
-    
-    # 기본 메타데이터에 타임스탬프 추가
-    metadata.update({
-        "timestamp": datetime.now().isoformat()
-    })
-    
+
+    # 메타데이터 구성
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "type": memory_type,  # 파라미터로 받은 타입 사용
+        "persona_name": persona_name,
+    }
+
     # 고유 ID 생성
-    unique_id = f"{uid}_{metadata['type']}_{datetime.now().isoformat()}"
-    
+    unique_id = f"{uid}_{metadata['type']}_{metadata['persona_name']}_{metadata['timestamp']}"
+
     # 컬렉션에 저장
     collection.add(
-        documents=[content],
+        documents=[memory],
         embeddings=[embedding],
         metadatas=[metadata],
         ids=[unique_id]

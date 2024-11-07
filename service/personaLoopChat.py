@@ -53,13 +53,13 @@ tools = [
         - "persona_chat": 페르소나 채팅 메모리만 검색
         - "event": 이벤트 메모리만 검색
         - "emotion": 감정 메모리만 검색
-        - "clone": 사용자 분신 채팅 메모리만 검색
+        - "clone": 사용자 분신 팅 메모리만 검색
         
         반환 형식: [시간] (타입: X) 내용"""
     ),
     Tool(
         name="Short Term Memory",
-        func=get_short_term_memory_tool,
+        func=lambda x: get_short_term_memory(**json.loads(x)),  # 함수 직접 호출로 변경
         description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
         {
             "uid": "사용자ID",
@@ -70,9 +70,8 @@ tools = [
         memory_type 설명:
         - recent: 최근 1시간 내 기억 (최대 20개)
         - today: 오늘의 기억 (최대 50개)
-        - weekly: 일주일 내 중요 기억 (최대 100개, 중요도 7 이상)
-        
-        반환 형식: [시간] [타입] (중요도: X) 내용"""
+        - weekly: 이번 주 중요 기억 (최대 100개, 중요도 7이상)
+        """
     ),
     Tool(
         name="Search Firestore for user profile",
@@ -190,10 +189,14 @@ def get_conversation_history(uid, persona_name):
     return "\n".join(unique_history[-10:])  # 최근 10개만 반환
 
 def get_short_term_memory(uid, persona_name, memory_type="recent"):
-    redis_key = f"{uid}:{persona_name}:{memory_type}"
+    redis_key = f"memory:{uid}:{persona_name}:{memory_type}"
+    print(f"Searching Redis with key: {redis_key}")  # 디버그 로그
+    
     chat_history = redis_client.lrange(redis_key, 0, -1)
+    print(f"Found memories: {len(chat_history)}")  # 디버그 로그
     
     if not chat_history:
+        print("No memories found")  # 디버그 로그
         return []
     
     decoded_history = []
@@ -210,51 +213,80 @@ def get_short_term_memory(uid, persona_name, memory_type="recent"):
     return decoded_history
 
 def store_short_term_memory(uid, persona_name, memory):
-    # 응답 요약
-    summary = memory  # 필요한 경우 summarize_content(memory) 사용
-    
-    # 현재 시간 추가
-    current_time = datetime.now()
-    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 메모리 데이터 구조화
-    memory_data = {
-        "timestamp": timestamp,
-        "content": summary,
-        "importance": 5,  # 기본 중요도, 필요시 calculate_importance_llama(memory) 사용
-        "type": "chat"
-    }
-    
-    # JSON으로 직렬화
-    memory_json = json.dumps(memory_data, ensure_ascii=False)
-    
-    # 시간대별 저장
-    time_keys = {
-        "recent": {
-            "key": f"{uid}:{persona_name}:recent",
-            "max_items": 20,
-            "ttl": 3600
-        },
-        "today": {
-            "key": f"{uid}:{persona_name}:today",
-            "max_items": 50,
-            "ttl": 86400
-        },
-        "weekly": {
-            "key": f"{uid}:{persona_name}:weekly",
-            "max_items": 100,
-            "ttl": 604800
+    try:
+        memory_data = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "content": memory,
+            "importance": 5,  # 기본 중요도
+            "type": "chat",
+            "persona_name": persona_name
         }
-    }
-    
-    # 각 시간대별로 저장
-    for storage_type, config in time_keys.items():
-        if storage_type == "weekly" and memory_data["importance"] < 7:
-            continue
+        memory_json = json.dumps(memory_data, ensure_ascii=False)
+        
+        # Redis 키 구성 개선
+        configs = [
+            {
+                "key": f"memory:{uid}:{persona_name}:recent",
+                "max_items": 20,
+                "ttl": 3600  # 1시간
+            },
+            {
+                "key": f"memory:{uid}:{persona_name}:today",
+                "max_items": 50,
+                "ttl": 86400  # 24시간
+            },
+            {
+                "key": f"memory:{uid}:{persona_name}:weekly",
+                "max_items": 100,
+                "ttl": 604800  # 7일
+            }
+        ]
+        
+        # 트랜잭션으로 처리
+        pipe = redis_client.pipeline()
+        try:
+            for config in configs:
+                # weekly는 중요도 7 이상만 저장
+                if config["key"].endswith(":weekly") and memory_data["importance"] < 7:
+                    continue
+                    
+                pipe.lpush(config["key"], memory_json)
+                pipe.ltrim(config["key"], 0, config["max_items"] - 1)
+                pipe.expire(config["key"], config["ttl"])
             
-        redis_client.lpush(config["key"], memory_json)
-        redis_client.ltrim(config["key"], 0, config["max_items"] - 1)
-        redis_client.expire(config["key"], config["ttl"])
+            pipe.execute()
+        except Exception as e:
+            print(f"Redis 트랜잭션 오류: {str(e)}")
+            pipe.reset()
+            
+    except Exception as e:
+        print(f"단기 메모리 저장 오류: {str(e)}")
+
+async def calculate_importance_llama(text: str) -> int:
+    """텍스트의 중요도를 계산"""
+    try:
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        prompt = PromptTemplate.from_template("""
+        다음 텍스트의 중요도를 1-10 사이의 숫자로만 응답해주세요. 다른 설명은 하지 말고 숫자만 응답하세요.
+        
+        평가 기준:
+        - 감정적 강도
+        - 정보의 가치
+        - 기억할 필요성
+        
+        텍스트: {text}""")
+        
+        # 체인 실행
+        chain = prompt | llm
+        result = await chain.ainvoke({"text": text})
+        # 숫자만 추출
+        importance = int(''.join(filter(str.isdigit, result.content.strip())))
+        
+        return max(1, min(10, importance))  # 1-10 사이로 제한
+        
+    except Exception as e:
+        print(f"중요도 계산 중 오류: {str(e)}")
+        return 5  # 오류 발생시 기본값
 
 async def persona_chat_v2(chat_request: ChatRequestV2):
     print("personaLoopChat > persona_chat_v2 > chat_request : ", chat_request)
@@ -368,18 +400,47 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                     memory=f"{display_name}: {cleaned_response}"
                 )
                 
-                # 벡터 DB에 저장 (중요도 5 이상)
-                memory_content = {
-                    "sender": display_name,
-                    "message": cleaned_response,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "chat_history": conversation_history  # 대화 기록 추가
-                }
-                store_long_term_memory(
-                    uid=uid,
-                    persona_name=actual_persona_name,
-                    memory=json.dumps(memory_content, ensure_ascii=False)
-                )
+                try:
+                    # 중요도 계산
+                    importance = await calculate_importance_llama(cleaned_response)
+                    
+                    # ChromaDB에 저장 메타데이터 준비
+                    metadata = {
+                        "sender": display_name,
+                        "message": cleaned_response,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "persona_chat",
+                        "importance": int(importance),  # 정수형으로 변환
+                        "persona_name": actual_persona_name  # 페르소나 이름 추가
+                    }
+                    
+                    # ChromaDB에 직접 저장
+                    from database import store_memory_to_vectordb
+                    store_memory_to_vectordb(
+                        uid=uid,
+                        content=cleaned_response,  # 실제 텍스트 내용
+                        metadata=metadata  # 메타데이터
+                    )
+                    
+                except Exception as e:
+                    print(f"Error storing memory: {str(e)}")
+                    # 오류 발생 시 기본값으로 저장
+                    metadata = {
+                        "sender": display_name,
+                        "message": cleaned_response,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "persona_chat",
+                        "importance": 5,  # 기본 중요도
+                        "persona_name": actual_persona_name
+                    }
+                    try:
+                        store_memory_to_vectordb(
+                            uid=uid,
+                            content=cleaned_response,
+                            metadata=metadata
+                        )
+                    except Exception as e:
+                        print(f"Error storing memory with default values: {str(e)}")
 
         return {"message": "Conversation completed successfully"}
         

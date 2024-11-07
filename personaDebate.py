@@ -72,28 +72,34 @@ class DebateRound:
             store_short_term_memory(
                 self.request.uid, 
                 speaker, 
-                f"{speaker}: {text}"
+                f"{speaker}: {text}",
+                memory_type="debate"
             )
             
-            # 중요도 계산
-            importance = calculate_importance_llama(text)
-            
-            # 중요도가 8 이상이면 장기 기억에 저장
-            if importance >= 5:
-                # 요약 생성
-                summary = summarize_content(text)
-                # 장기 기억에 저장
-                store_long_term_memory(
-                    self.request.uid,
-                    speaker,
-                    summary
-                )
+            # 중요도 계산 및 저장을 비동기로 처리
+            asyncio.create_task(self._store_memory(speaker, text))
         
         print(f"\n{'🎭' if speaker == 'Moderator' else '💭'} {speaker}({personas[speaker]['realName']})")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print(f"{text}")
         print(f"글자 수: {len(text)}자")
         print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    async def _store_memory(self, speaker: str, text: str):
+        try:
+            # 중요도 계산
+            importance = await calculate_importance_llama(text)
+            
+            # 중요도가 5 이상이면 장기 기억에 저장
+            if importance >= 5:
+                store_long_term_memory(
+                    self.request.uid,
+                    speaker,
+                    text,
+                    memory_type="debate"  # 토론 타입 지정
+                )
+        except Exception as e:
+            print(f"메모리 저장 중 오류: {str(e)}")
 
 def print_sms(message_data: str) -> str:
     data = json.loads(message_data)
@@ -503,7 +509,7 @@ async def run_persona_debate(event_request: StarEventRequest):
 
 async def parse_final_answer(output: str) -> dict:
     try:
-        # 구분자로 나누어진 최종 결정 부분 찾기
+        # 구분자로 나누어진 최종 ���정 부분 찾��
         if "======================================" in output:
             parts = output.split("======================================")
             if len(parts) >= 3:
