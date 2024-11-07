@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from database import db
 from firebase_admin import firestore
 from service.personaLoopChat import model
+from service.personaChatVer3 import store_long_term_memory
 
 class FeedCommentRequest(BaseModel):
     uid: str                    # 게시물 작성자 ID
@@ -253,6 +254,14 @@ async def run_debate(request: FeedCommentRequest):
                 if opinion:
                     opinions[persona['Name']] = opinion
                     await debate.add_message(persona['Name'], opinion)
+                    
+                    # 의견을 단기 메모리에 저장
+                    store_long_term_memory(
+                        request.uid,
+                        persona['Name'],
+                        opinion,
+                        memory_type="feed_comment"  # 피드 댓글 타입 지정
+                    )
                     print(f"✅ 의견: {opinion[:50]}...")
             except Exception as e:
                 print(f"❌ {persona.get('DPNAME', '알 수 없는 페르소나')}의 의견 생성 중 오류: {str(e)}")

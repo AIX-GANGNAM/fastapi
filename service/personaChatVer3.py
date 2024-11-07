@@ -24,6 +24,8 @@ from langchain_ollama import OllamaLLM  # 새로운 import 문
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
 from langchain_openai import ChatOpenAI
+import asyncio
+from fastapi import HTTPException
 
 # Ollama 대신 OllamaLLM 사용
 llm = OllamaLLM(
@@ -38,7 +40,7 @@ gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
 async def calculate_importance_llama(text: str) -> int:
     """텍스트의 중요도를 계산"""
     try:
-        llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         prompt = PromptTemplate.from_template("""
         다음 텍스트의 중요도를 1-10 사이의 숫자로 평가해주세요.
         평가 기준:
@@ -50,10 +52,8 @@ async def calculate_importance_llama(text: str) -> int:
         
         중요도 (1-10):""")
         
-        # 새로운 방식으로 체인 구성
-        chain = prompt | llm
-        
         # 체인 실행
+        chain = prompt | llm
         result = await chain.ainvoke({"text": text})
         importance = int(result.content.strip())
         
@@ -94,21 +94,26 @@ def get_long_term_memory_tool(params):
             params = params.replace('\\"', '"').strip('"')
             params_dict = json.loads(params)
         
-        uid = params_dict.get('uid')
-        persona_name = params_dict.get('persona_name')
-        query = params_dict.get('query')
-        limit = params_dict.get('limit', 3)
-        
-        # 검색 실행
         results = query_memories(
-            uid=uid,
-            query=query,
-            memory_type="persona_chat",
-            persona_name=persona_name,
-            limit=limit
+            uid=params_dict.get('uid'),
+            query=params_dict.get('query'),
+            memory_type=params_dict.get('type'),
+            persona_name=params_dict.get('persona_name'),
+            limit=params_dict.get('limit', 3)
         )
         
-        return results['documents'][0] if results['documents'] else []
+        # 결과 포맷팅
+        formatted_memories = []
+        for result in results:
+            content = result['content']
+            metadata = result['metadata']
+            formatted_memories.append(
+                f"[{metadata['timestamp']}] "
+                f"(중요도: {metadata['importance']}) "
+                f"{content.get('message', content) if isinstance(content, dict) else content}"
+            )
+        
+        return formatted_memories
         
     except Exception as e:
         print(f"Error in get_long_term_memory_tool: {str(e)}")
@@ -221,20 +226,22 @@ def get_short_term_memory(uid, persona_name, memory_type="recent"):
     ]
 
 # 장기 기억 함수
-def store_long_term_memory(uid, persona_name, memory):
+def store_long_term_memory(uid: str, persona_name: str, memory: str, memory_type: str):
     """벡터 DB에 통합 메모리 저장"""
     collection = get_user_collection(uid)
     
     # 임베딩 생성
-    embedding = embeddings.embed_query(memory)
+    embedding = gpt4_model.embeddings.create(
+        input=memory,
+        model="text-embedding-ada-002"
+    ).data[0].embedding
     
     # 메타데이터 구성
     metadata = {
         "timestamp": datetime.now().isoformat(),
-        "type": "persona_chat",
+        "type": memory_type,  # 파라미터로 받은 타입 사용
         "persona_name": persona_name,
-        "importance": calculate_importance_llama(memory),
-        "content": memory
+        "importance": calculate_importance_llama(memory)
     }
     
     # 고유 ID 생성
@@ -260,7 +267,7 @@ def get_long_term_memory(uid, persona_name, query, limit=3):
         where={"type": "persona_chat", "persona_name": persona_name}
     )
     
-    # 결과가 있는 경우 content 필드를 반환
+    # 결과�� 있는 경우 content 필드를 반환
     if results['metadatas'] and results['documents']:
         formatted_memories = []
         for metadata, document in zip(results['metadatas'][0], results['documents'][0]):
@@ -417,7 +424,7 @@ tools = [
       Tool(
         name="Short Term Memory",
         func=get_short_term_memory_tool,
-        description="""Redis에서 시간대별 기억을 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
+        description="""Redis에서 시간대별 기억 검색합니다. Input은 다음 형식의 JSON이어야 합니다:
         {
             "uid": "사용자ID",
             "persona_name": "페르소나이름",
@@ -535,63 +542,65 @@ def sort_personas(persona1, persona2):
         return f"{persona2}_{persona1}"
 
 async def simulate_conversation(request: PersonaChatRequest):
-    selected_personas = [request.persona1, request.persona2]
-    previous_response = request.topic  # 최초 주제를 `previous_response`로 설정
-
-    # 페르소나 쌍 이름을 정의된 순서에 따라 정렬
-    pair_name = sort_personas(request.persona1, request.persona2)  # 예: "Anger_Disgust"
-
-    # 정렬된 페르소나 쌍을 사용하여 chat_ref 생성
-    chat_ref = db.collection('personachat').document(request.uid).collection(pair_name)
-
-    for i in range(request.rounds):
-        for persona in selected_personas:
-            persona_info = personas[persona]
-
-            # 에이전트 호출에 필요한 입력값 정의
-            inputs = {
-                "input": previous_response,
-                "persona1_name": request.persona1,
-                "persona1_description": personas[request.persona1]["description"],
-                "persona1_tone": personas[request.persona1]["tone"],
-                "persona1_example": personas[request.persona1]["example"],
-                "persona2_name": request.persona2,
-                "persona2_description": personas[request.persona2]["description"],
-                "persona2_tone": personas[request.persona2]["tone"],
-                "persona2_example": personas[request.persona2]["example"],
-                "current_persona_name": persona,
-                "agent_scratchpad": "",
-                "uid": request.uid,
-                "topic": request.topic,
-            }
-
-            # 에이전트 호출
-            response = agents[persona].invoke(inputs)
-
-            # 현재 페르소나에 따라 speaker 값을 설정
-            speaker = persona  # 현재 페르소나를 speaker로 설정
-            chat_ref.add({
-                'speaker': speaker,
-                'text': response['output'],
-                'timestamp': datetime.now().isoformat(),
-                'isRead': False
-            })
-
-            # 단기 기억에 저장
-            store_short_term_memory(request.uid, persona, f"{persona}: {response['output']}")
-
-            # 중요도 계산
-            importance = calculate_importance_llama(response['output'])
-
-            # 중요도가 8 이상이면 벡터 db에 저장
-            if importance >= 5:
-                store_long_term_memory(request.uid, persona, response['output'])
-
-            # 현재 페르소나의 응답을 다음 입력으로 설정
-            previous_response = response['output']
-
-    return {"message": "Conversation simulated successfully."}  # 성공적으로 완료된 경우 반환        
+    try:
+        selected_personas = [request.persona1, request.persona2]
+        pair_name = sort_personas(request.persona1, request.persona2)
+        chat_ref = db.collection('personachat').document(request.uid).collection(pair_name)
         
+        previous_response = request.topic
+        
+        for i in range(request.rounds):
+            for persona in selected_personas:
+                try:
+                    # ... 기존 대화 생성 코드 ...
+                    
+                    # 메모리 저장 부분을 비동기로 처리
+                    asyncio.create_task(store_conversation_memory(
+                        request.uid,
+                        persona,
+                        response['output'],
+                        chat_ref
+                    ))
+                    
+                    previous_response = response['output']
+                    
+                except Exception as e:
+                    print(f"대화 라운드 처리 오류: {str(e)}")
+                    continue
+                    
+        return {"message": "대화가 성공적으로 완료되었습니다."}
+        
+    except Exception as e:
+        print(f"대화 시뮬레이션 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def store_conversation_memory(uid, persona, message, chat_ref):
+    try:
+        # Firestore에 저장
+        chat_ref.add({
+            'speaker': persona,
+            'text': message,
+            'timestamp': datetime.now().isoformat(),
+            'isRead': False
+        })
+        
+        # 단기 메모리 저장
+        store_short_term_memory(uid, persona, f"{persona}: {message}")
+        
+        # 중요도 계산
+        importance = await calculate_importance_llama(message)
+        
+        # 중요도가 5 이상이면 장기 메모리 저장
+        if importance >= 5:
+            store_long_term_memory(
+                uid=uid,
+                persona_name=persona,
+                memory=message,
+                memory_type="conversation"
+            )
+            
+    except Exception as e:
+        print(f"대화 메모리 저장 오류: {str(e)}")
 
 
 

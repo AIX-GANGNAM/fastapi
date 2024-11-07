@@ -65,6 +65,7 @@ async def store_user_interaction(uid: str, message: str, interaction_type: str =
             "type": interaction_type  # 'chat' or 'comment'
         }
         
+        print(f"interaction_data: {interaction_data}")
         # Redis에 저장
         redis_client.lpush(redis_key, json.dumps(interaction_data))
         
