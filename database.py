@@ -74,19 +74,27 @@ def query_memories(
     ).data[0].embedding
     
     # 필터 조건 구성
-    where = {}
+    where_conditions = {}
     if memory_type:
-        where["type"] = memory_type
+        where_conditions["type"] = memory_type
     if persona_name:
-        where["persona_name"] = persona_name
+        where_conditions["persona_name"] = persona_name
     
-    # 검색 실행
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=limit,
-        where=where if where else None
-    )
-    
-    return results
+    try:
+        # 검색 실행
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            where=where_conditions if where_conditions else None
+        )
+        return results
+    except Exception as e:
+        print(f"메모리 검색 오류: {str(e)}")
+        # 검색 실패 시 빈 결과 반환
+        return {
+            "documents": [[]],
+            "distances": [],
+            "metadatas": []
+        }
 
 redis_client = redis.Redis(host='localhost', port=6379, db=0)
