@@ -52,7 +52,7 @@ analysis_prompt = PromptTemplate(
 # RunnableSequence 생성
 analysis_chain = analysis_prompt | gpt4_model
 
-async def store_user_interaction(uid: str, message: str, interaction_type: str = 'chat'):
+async def store_user_interaction(uid: str, interaction_type: str, content: str, importance: int = 5):
     """사용자의 상호작용을 Redis에 저장하고, 필요시 분석을 수행합니다."""
     try:
         redis_key = f"user:{uid}:interactions"
@@ -61,8 +61,9 @@ async def store_user_interaction(uid: str, message: str, interaction_type: str =
         # 상호작용 데이터 저장
         interaction_data = {
             "timestamp": current_time,
-            "message": message,
-            "type": interaction_type  # 'chat' or 'comment'
+            "message": content,
+            "type": interaction_type,  # 'chat' or 'comment'
+            "importance": importance
         }
         
         print(f"interaction_data: {interaction_data}")

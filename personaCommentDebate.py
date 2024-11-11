@@ -257,9 +257,9 @@ async def run_debate(request: FeedCommentRequest):
                     
                     # 의견을 단기 메모리에 저장
                     store_long_term_memory(
-                        request.uid,
-                        persona['Name'],
-                        opinion,
+                        uid=request.uid,
+                        persona_name=persona['Name'],
+                        memory=opinion,
                         memory_type="feed_comment"  # 피드 댓글 타입 지정
                     )
                     print(f"✅ 의견: {opinion[:50]}...")

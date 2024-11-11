@@ -25,6 +25,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from personaCommentDebate import run_debate, FeedCommentRequest
 from service.interactionStore import store_user_interaction
+from service.friendPersonaComment import generate_friends_comments, FriendCommentRequest
+
 # OpenAI 객체를 생성합니다.
 model = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
 
@@ -348,7 +350,7 @@ async def create_feed_post(post):
             
         await store_user_interaction(
             uid=post.userId,
-            message=memory_content,
+            content=memory_content,  # message를 content로 변경
             interaction_type='feed',
             importance=8  # 피드 게시는 중요한 이벤트로 간주
         )
@@ -384,6 +386,16 @@ async def create_feed_post(post):
         )
 
         await run_debate(comment_debate_request)
+
+        # 친구들의 페르소나 댓글 생성
+        friend_comment_request = FriendCommentRequest(
+            userId=post.userId,
+            feedId=post.id,
+            image_description=image_description,
+            caption=post.caption,
+            friendId=""  # generate_friends_comments 함수에서 친구 목록을 조회함
+        )
+        await generate_friends_comments(friend_comment_request)
 
         # 피드 내용을 장기 메모리로 저장
         feed_content = f"Caption: {post.caption}\nImage Description: {image_description}"
