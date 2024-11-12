@@ -90,6 +90,7 @@ async def network_check(request: Request):
 # 스케줄러 상태 확인 엔드포인트
 @app.get("/scheduler-status")
 async def get_scheduler_status():
+    print("get_scheduler_status 호출")
     try:
         jobs = scheduler.get_jobs()
         return {
@@ -109,6 +110,7 @@ async def get_scheduler_status():
 # 라우트 정의
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(chat_request: ChatRequest):
+    print("chat_endpoint 호출")
     uid = chat_request.user.get('uid', '')
     
     response = await chat_with_persona(chat_request)
@@ -124,6 +126,7 @@ async def chat_endpoint(chat_request: ChatRequest):
 
 @app.post("/v2/chat")
 async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
+    print("persona_chat_v2_endpoint 호출")
     try:
         return await persona_chat_v2(chat_request)
     except Exception as e:
@@ -133,6 +136,7 @@ async def persona_chat_v2_endpoint(chat_request: ChatRequestV2):
 
 @app.get("/personas")
 async def get_personas_endpoint():
+    print("get_personas_endpoint 호출")
     return get_personas()
 
 @app.post("/feed") # 피드 생성 엔드포인트
@@ -142,14 +146,17 @@ async def create_feed_post_endpoint(post: FeedPost):
 
 @app.post("/persona-chat") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def persona_chat_endpoint(chat_request: PersonaChatRequest):
+    print("persona_chat_endpoint 호출")
     return await persona_chat(chat_request)
 
 @app.post("/v3/persona-chat") # 이게 최신버전임
 async def persona_chat_v3_endpoint(chat_request: PersonaChatRequest):
+    print("persona_chat_v3_endpoint 호출")
     return await persona_chat_v2(chat_request)
 
 @app.post("/execute-task") # 페르소나 상호간의 대화 테스트 엔드포인트
 async def execute_task_endpoint(task_request: TaskRequest, background_tasks: BackgroundTasks):
+    print("execute_task_endpoint 호출")
     task = create_task(
         task_request.uid,
         task_request.persona_name,
@@ -162,6 +169,7 @@ async def execute_task_endpoint(task_request: TaskRequest, background_tasks: Bac
 
 @app.post("/generate-user-schedule/{uid}")
 async def generate_user_schedule_endpoint(uid: str, background_tasks: BackgroundTasks):
+    print("generate_user_schedule_endpoint 호출")
     all_schedules = generate_and_save_user_schedule(uid)
     background_tasks.add_task(schedule_tasks, uid, all_schedules)
     return {"message": f"Schedule generated and saved for user {uid}"}
@@ -181,6 +189,7 @@ async def network_check_endpoint():
 # SMS 전송 엔드포인트 (Test 용)
 @app.post("/send_sms")
 def send_sms(request: SmsRequest):
+    print("send_sms 호출")
     result = send_sms_service(request)  # 비동기로 서비스 함수 호출
 
     # 서비스 함수로부터 성공/실패 결과를 받아서 HTTPException 처리
@@ -191,6 +200,7 @@ def send_sms(request: SmsRequest):
     
 @app.post("/star-event")
 async def star_event_endpoint(request: StarEventRequest):
+    print("star_event_endpoint 호출")
     if request.starred:
         try:
             kst = pytz.timezone('Asia/Seoul')
@@ -242,11 +252,13 @@ async def star_event_endpoint(request: StarEventRequest):
 
 @app.post("/generate-personality")
 async def generate_personality_endpoint(request: GeneratePersonalityRequest):
+    print("generate_personality_endpoint 호출")
     return await generate_personality(request)
 
 
 @app.post("/update-personality")
 async def update_personality_endpoint(request: UserProfile):
+    print("update_personality_endpoint 호출")
     return await update_clone_personality(request)
 
 @app.post("/store-comment-interaction")
@@ -254,6 +266,7 @@ async def store_comment_interaction(comment_data: CommentInteraction):
     """
     댓글 작성 시 사용자 상호작용을 저장하는 엔드포인트
     """
+    print("store_comment_interaction 호출")
     return await store_user_interaction(
         uid=comment_data.uid,
         message=comment_data.content,
@@ -262,6 +275,7 @@ async def store_comment_interaction(comment_data: CommentInteraction):
 
 @app.post("/clone-chat")
 async def clone_chat_endpoint(chat_request: ChatRequest):
+    print("clone_chat_endpoint 호출")
     return await handle_offline_chat_service(chat_request)
 
 @app.post("/notification")
