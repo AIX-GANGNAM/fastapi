@@ -4,6 +4,7 @@ from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 import json
+from google.cloud import firestore
 
 # GPT-4 모델 초기화
 gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
@@ -52,37 +53,30 @@ analysis_prompt = PromptTemplate(
 # RunnableSequence 생성
 analysis_chain = analysis_prompt | gpt4_model
 
-async def store_user_interaction(uid: str, interaction_type: str, content: str, importance: int = 5):
-    """사용자의 상호작용을 Redis에 저장하고, 필요시 분석을 수행합니다."""
+async def store_user_interaction(uid: str, interaction_data: dict):
+    """사용자 상호작용을 저장하는 함수"""
     try:
-        redis_key = f"user:{uid}:interactions"
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 상호작용 데이터 저장
-        interaction_data = {
-            "timestamp": current_time,
-            "message": content,
-            "type": interaction_type,  # 'chat' or 'comment'
-            "importance": importance
-        }
-        
-        print(f"interaction_data: {interaction_data}")
-        # Redis에 저장
-        redis_client.lpush(redis_key, json.dumps(interaction_data))
-        
-        # 저장된 상호작용 수 확인
-        interactions_count = redis_client.llen(redis_key)
+        # 상호작용 저장
+        interactions_ref = db.collection('interactions').document(uid)
+        interactions_doc = interactions_ref.get()
 
-        print(f"저장된 상호작용 수: {interactions_count}")
-        
-        # 10개가 쌓이면 분석 및 업데이트 실행
-        if interactions_count >= 10:
-            await analyze_and_update_persona(uid)
-            # 분석 후 Redis 데이터 초기화
-            redis_client.delete(redis_key)
-            
+        if not interactions_doc.exists:
+            # 문서가 없으면 새로 생성
+            interactions_ref.set({
+                'interactions': [interaction_data]
+            })
+        else:
+            # 기존 문서에 상호작용 추가
+            interactions_ref.update({
+                'interactions': firestore.ArrayUnion([interaction_data])
+            })
+
+        print(f"저장된 상호작용 수: {len(interactions_doc.to_dict().get('interactions', [])) if interactions_doc.exists else 1}")
+        return True
+
     except Exception as e:
-        print(f"상호작용 저장 중 오류 발생: {str(e)}")
+        print(f"상호작용 저장 오류: {str(e)}")
+        return False
 
 async def analyze_interactions_with_llm(current_clone: dict, interactions: list):
     """LLM을 사용하여 상호작용을 분석합니다."""
