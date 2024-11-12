@@ -3,11 +3,10 @@ from datetime import datetime
 import requests
 from database import db
 from models import NotificationRequest
-
+import asyncio
 
 async def send_expo_push_notification(notification_request: NotificationRequest):  
     print("service > send_expo_push_notification 호출")
-    # 푸시 알림 보내기 필요한 정보 (uid, whoSendMessage(누가 보내는지), message(알림 메시지), pushType(어떤 타입으로 알람을 보내는지, chat, persona, follow, like, 등등))
     targetUid = notification_request.targetUid
     fromUid = notification_request.fromUid
     whoSendMessage = notification_request.whoSendMessage
@@ -23,47 +22,84 @@ async def send_expo_push_notification(notification_request: NotificationRequest)
 
     targetUser_ref = db.collection('users').document(targetUid)
     targetUser_doc = targetUser_ref.get()
-    if targetUser_doc.exists:
-        targetExpo_token = targetUser_doc.to_dict().get('pushToken') # 푸시 토큰 가져오기
-        if targetExpo_token:
-            headers = {
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip, deflate',
-                'Content-Type': 'application/json',
-            }
-
-            # 푸시 알림 데이터 (JSON)
-            # 알람 미리보기에 표시되는 내용 (알림 종류, 누가, 무엇을, 했어요 ) (pushType, whoSendMessage, message)
-            # ex) 좋아요 알림, 최창욱님이 당신의 피드에 좋아요를 눌렀어요.
-            # ex) 친구요청 알림, 최창욱님이 당신에게 친구요청을 보냈어요.
-            payload = {
-                "to": targetExpo_token,
-                "sound": 'default',
-                "title": f"{whoSendMessage}",
-                "body": message,
-                "priority": "high",        
-                "channelId": 'channel_high', # Android API26 오레오 버전부터 Notification Channel을 추가해야 -> Head up notification 사용 가능
-                "data": {
-                    "whoSendMessage": whoSendMessage,
-                    "highlightTitle": screenType,
-                    "fromUid": fromUid,
-                    "highlightImage": 'https://example.com/default-image.jpg',
-                    "screenType": screenType,
-                    "URL": URL,
-                    "pushTime": datetime.now().isoformat(),
-                }
-            }   
-            print("services > send_expo_push_notification > payload : ", payload)
-
-            # Expo 서버로 푸시 알림 요청 전송
-            response = requests.post("https://exp.host/--/api/v2/push/send", json=payload, headers=headers)
-            print("services > send_expo_push_notification > 전송결과", response)
-            # 요청 결과 처리
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-        else:
-            raise HTTPException(status_code=404, detail="푸시 토큰을 찾을 수 없습니다.")
-    else:
-        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     
-    return response.json()
+    if not targetUser_doc.exists:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+        
+    user_data = targetUser_doc.to_dict()
+    push_tokens = user_data.get('pushTokens', [])
+    
+    # 이전 버전 호환성을 위한 처리
+    if old_token := user_data.get('pushToken'):
+        if old_token not in push_tokens:
+            push_tokens.append(old_token)
+    
+    if not push_tokens:
+        raise HTTPException(status_code=404, detail="푸시 토큰을 찾을 수 없습니다.")
+
+    headers = {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+    }
+
+    base_payload = {
+        "sound": 'default',
+        "title": f"{whoSendMessage}",
+        "body": message,
+        "priority": "high",        
+        "channelId": 'channel_high',
+        "data": {
+            "whoSendMessage": whoSendMessage,
+            "highlightTitle": screenType,
+            "fromUid": fromUid,
+            "highlightImage": 'https://example.com/default-image.jpg',
+            "screenType": screenType,
+            "URL": URL,
+            "pushTime": datetime.now().isoformat(),
+        }
+    }
+
+    async def send_single_notification(token):
+        try:
+            payload = {**base_payload, "to": token}
+            print(f"토큰으로 알림 전송 시도: {token}")
+            response = requests.post(
+                "https://exp.host/--/api/v2/push/send", 
+                json=payload, 
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                print(f"알림 전송 성공: {token} + {datetime.now()}")
+                return {"token": token, "success": True, "response": response.json()}
+            else:
+                print(f"알림 전송 실패: {token}, 상태 코드: {response.status_code}")
+                return {"token": token, "success": False, "error": response.text}
+                
+        except Exception as e:
+            print(f"알림 전송 중 오류 발생: {token}, 오류: {str(e)}")
+            return {"token": token, "success": False, "error": str(e)}
+
+    # 모든 토큰에 대해 비동기로 알림 전송
+    notification_tasks = [send_single_notification(token) for token in push_tokens]
+    results = await asyncio.gather(*notification_tasks)
+    
+    # 실패한 토큰 처리 (선택적)
+    failed_tokens = [result["token"] for result in results if not result["success"]]
+    if failed_tokens:
+        print(f"실패한 토큰들: {failed_tokens}")
+        # 여기서 필요하다면 실패한 토큰을 데이터베이스에서 제거하는 로직을 추가할 수 있습니다
+        
+    # 하나라도 성공했다면 성공으로 간주
+    successful_results = [r for r in results if r["success"]]
+    if not successful_results:
+        raise HTTPException(status_code=500, detail="모든 알림 전송이 실패했습니다.")
+    
+    return {
+        "success": True,
+        "total_tokens": len(push_tokens),
+        "successful_deliveries": len(successful_results),
+        "failed_deliveries": len(failed_tokens),
+        "results": results
+    }
