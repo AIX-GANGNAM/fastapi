@@ -168,10 +168,10 @@ agent = create_react_agent(
 agent_executor = AgentExecutor(
     agent=agent,
     tools=tools,
-    verbose=True,
-    handle_parsing_errors=True,
-    max_iterations=10,
-    return_intermediate_steps=True
+    max_iterations=10,  # 반복 제한 증가
+    max_execution_time=30,  # 실행 시간 제한 증가 (초)
+    early_stopping_method="generate",  # 조기 중단 방법 설정
+    verbose=True
 )
 
 def get_conversation_history(uid, persona_name):
@@ -214,6 +214,7 @@ def get_short_term_memory(uid, persona_name, memory_type="recent"):
 
 def store_short_term_memory(uid, persona_name, memory):
     try:
+        # 메모리 데이터 구성
         memory_data = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "content": memory,
@@ -223,41 +224,27 @@ def store_short_term_memory(uid, persona_name, memory):
         }
         memory_json = json.dumps(memory_data, ensure_ascii=False)
         
-        # Redis 키 구성 개선
-        configs = [
-            {
-                "key": f"memory:{uid}:{persona_name}:recent",
-                "max_items": 20,
-                "ttl": 3600  # 1시간
-            },
-            {
-                "key": f"memory:{uid}:{persona_name}:today",
-                "max_items": 50,
-                "ttl": 86400  # 24시간
-            },
-            {
-                "key": f"memory:{uid}:{persona_name}:weekly",
-                "max_items": 100,
-                "ttl": 604800  # 7일
-            }
-        ]
+        # Redis 키 구성
+        recent_key = f"memory:{uid}:{persona_name}:recent"
+        today_key = f"memory:{uid}:{persona_name}:today"
+        weekly_key = f"memory:{uid}:{persona_name}:weekly"
         
-        # 트랜잭션으로 처리
-        pipe = redis_client.pipeline()
+        # 직접 저장 시도
         try:
-            for config in configs:
-                # weekly는 중요도 7 이상만 저장
-                if config["key"].endswith(":weekly") and memory_data["importance"] < 7:
-                    continue
-                    
-                pipe.lpush(config["key"], memory_json)
-                pipe.ltrim(config["key"], 0, config["max_items"] - 1)
-                pipe.expire(config["key"], config["ttl"])
+            # recent (최근 1시간)
+            redis_client.lpush(recent_key, memory_json)
+            redis_client.ltrim(recent_key, 0, 19)  # 최근 20개만 유지
+            redis_client.expire(recent_key, 3600)  # 1시간
             
-            pipe.execute()
+            # today (오늘)
+            redis_client.lpush(today_key, memory_json)
+            redis_client.ltrim(today_key, 0, 49)  # 최근 50개만 유지
+            redis_client.expire(today_key, 86400)  # 24시간
+            
+            print(f"메모리 저장 완료 - recent: {recent_key}, today: {today_key}")
+            
         except Exception as e:
-            print(f"Redis 트랜잭션 오류: {str(e)}")
-            pipe.reset()
+            print(f"Redis 저장 오류: {str(e)}")
             
     except Exception as e:
         print(f"단기 메모리 저장 오류: {str(e)}")
@@ -332,11 +319,15 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
             "user_profile": user_profile
         }
         
-        # 사용자 메시 저장 (채팅 시작 부분에 추가)
+        # 사용자 메시지 저장
         await store_user_interaction(
             uid=chat_request.uid,
-            message=chat_request.user_input,
-            interaction_type='chat'
+            interaction_data={
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'message': chat_request.user_input,
+                'type': 'chat',
+                'importance': 5  # 기본 중요도 설정
+            }
         )
         
         # 에이전트 실행
@@ -359,14 +350,14 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 'sender': persona_name,
                 'message': default_response
             })
-            notification_request = NotificationRequest(
-                uid=uid, 
-                whoSendMessage=persona_name, 
-                message=default_response, 
-                pushType="persona_chat"
-            )
-            notification = await send_expo_push_notification(notification_request)   
-            print(f"persona_chat_v2 >Notification (기본 응답 저장): {notification}")  
+            # notification_request = NotificationRequest(
+            #     uid=uid, 
+            #     whoSendMessage=persona_name, 
+            #     message=default_response, 
+            #     pushType="persona_chat"
+            # )
+            # notification = await send_expo_push_notification(notification_request)   
+            # print(f"persona_chat_v2 >Notification (기본 응답 저장): {notification}")  
             return {"message": "Default response saved successfully"}
         
 
@@ -384,22 +375,26 @@ async def persona_chat_v2(chat_request: ChatRequestV2):
                 })
 
                 # 알림 전송
-                notification_request = NotificationRequest(
-                    uid=uid, 
-                    whoSendMessage=persona_name, 
-                    message=cleaned_response, 
-                    pushType="persona_chat"
-                )
-                notification = await send_expo_push_notification(notification_request)
-                print(f"persona_chat_v2 > Notification: {notification}")
+                # notification_request = NotificationRequest(
+                #     uid=uid, 
+                #     whoSendMessage=persona_name, 
+                #     message=cleaned_response, 
+                #     pushType="persona_chat"
+                # )
+                # notification = await send_expo_push_notification(notification_request)
+                # print(f"persona_chat_v2 > Notification: {notification}")
 
                 # 단기 기억 저장 (Redis)
-                store_short_term_memory(
-                    uid=uid,
-                    persona_name=actual_persona_name,
-                    memory=f"{display_name}: {cleaned_response}"
-                )
-                
+                try:
+                    store_short_term_memory(
+                        uid=uid,
+                        persona_name=actual_persona_name,
+                        memory=f"{display_name}: {cleaned_response}"
+                    )
+                    print(f"단기 메모리 저장 성공: {cleaned_response[:30]}...")
+                except Exception as e:
+                    print(f"단기 메모리 저장 실패: {str(e)}")
+
                 try:
                     # 중요도 계산
                     importance = await calculate_importance_llama(cleaned_response)
