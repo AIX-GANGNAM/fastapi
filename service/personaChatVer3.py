@@ -40,7 +40,7 @@ gpt4_model = ChatOpenAI(model="gpt-4o", temperature=0.7)
 async def calculate_importance_llama(text: str) -> int:
     """텍스트의 중요도를 계산"""
     try:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
         prompt = PromptTemplate.from_template("""
         다음 텍스트의 중요도를 1-10 사이의 숫자로 평가해주세요.
         평가 기준:

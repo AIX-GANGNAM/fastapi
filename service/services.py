@@ -350,9 +350,12 @@ async def create_feed_post(post):
             
         await store_user_interaction(
             uid=post.userId,
-            content=memory_content,  # message를 content로 변경
-            interaction_type='feed',
-            importance=8  # 피드 게시는 중요한 이벤트로 간주
+            interaction_data={
+                'type': 'feed',
+                'importance': 8,
+                'message': memory_content,  # 위에서 생성한 memory_content 활용
+                'timestamp': datetime.now().isoformat()
+            }
         )
 
         # Firestore 피드 문서 업데이트
